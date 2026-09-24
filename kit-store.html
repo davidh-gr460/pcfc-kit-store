@@ -125,9 +125,10 @@
   }
   .topbar .club {
     display: flex;
-    align-items: baseline;
+    align-items: center;
     gap: 10px;
   }
+  #clubLogo { height: 32px; width: auto; max-width: 60px; object-fit: contain; border-radius: 3px; flex-shrink: 0; }
   .topbar h1 {
     margin: 0;
     font-size: 1.25rem;
@@ -365,6 +366,21 @@
     border-bottom: 1px solid var(--border);
   }
 
+  .dropzone {
+    border: 2px dashed var(--border);
+    border-radius: var(--radius);
+    padding: 22px 16px;
+    text-align: center;
+    color: var(--text-soft);
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: border-color 0.15s ease, background 0.15s ease;
+  }
+  .dropzone:hover, .dropzone.dragover { border-color: var(--pitch-600); background: var(--tag-green-bg); }
+  .dropzone strong { color: var(--text); }
+  .logo-preview-row { display: flex; align-items: center; gap: 14px; margin-top: 14px; }
+  .logo-preview-row img { height: 56px; width: auto; max-width: 120px; object-fit: contain; border: 1px solid var(--border); border-radius: var(--radius); background: #fff; padding: 4px; }
+
   /* ---- Signature ---- */
   .sig-wrap { border: 1px solid var(--border); border-radius: var(--radius); background: #fff; touch-action: none; }
   canvas#sigCanvas { display: block; width: 100%; height: 150px; cursor: crosshair; }
@@ -498,6 +514,7 @@
 <div id="app">
   <div class="topbar">
     <div class="club">
+      <img id="clubLogo" alt="Club badge" style="display:none;">
       <h1>PCFC Kit Store</h1>
       <span class="sub">Equipment check-out register</span>
     </div>
@@ -549,6 +566,8 @@
     checkins: [],
     authorisers: [],
     suggestions: { names: [], teams: [], locations: [] },
+    accentColor: null,
+    logoDataUrl: null,
     ready: { equipment: false, checkouts: false, checkins: false, settings: false }
   };
 
@@ -593,6 +612,74 @@
     d.setDate(d.getDate() + n);
     return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
   }
+  function hexToRgb(hex) {
+    hex = (hex || "").replace("#", "");
+    if (hex.length === 3) hex = hex.split("").map(function (c) { return c + c; }).join("");
+    var num = parseInt(hex, 16) || 0;
+    return { r: (num >> 16) & 255, g: (num >> 8) & 255, b: num & 255 };
+  }
+  function rgbToHex(r, g, b) {
+    return "#" + [r, g, b].map(function (v) {
+      return Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, "0");
+    }).join("");
+  }
+  function scaleColor(hex, factor) {
+    var c = hexToRgb(hex);
+    return rgbToHex(c.r * factor, c.g * factor, c.b * factor);
+  }
+  function contrastText(hex) {
+    var c = hexToRgb(hex);
+    // relative luminance, simplified
+    var lum = (0.299 * c.r + 0.587 * c.g + 0.114 * c.b) / 255;
+    return lum > 0.6 ? "#14231C" : "#FFFFFF";
+  }
+
+  var APPEARANCE_TOKENS = ["--pitch-600", "--pitch-800", "--accent", "--accent-text", "--sidebar-bg", "--focus"];
+  var ACCENT_CACHE_KEY = "pcfcKitStoreAccent";
+  function applyAppearance() {
+    var root = document.documentElement;
+    if (!state.accentColor) {
+      APPEARANCE_TOKENS.forEach(function (t) { root.style.removeProperty(t); });
+      try { localStorage.removeItem(ACCENT_CACHE_KEY); } catch (e) {}
+      return;
+    }
+    var accent = state.accentColor;
+    var sidebar = scaleColor(accent, 0.47);
+    var text = contrastText(accent);
+    root.style.setProperty("--pitch-600", accent);
+    root.style.setProperty("--pitch-800", sidebar);
+    root.style.setProperty("--accent", accent);
+    root.style.setProperty("--accent-text", text);
+    root.style.setProperty("--sidebar-bg", sidebar);
+    root.style.setProperty("--focus", accent);
+    try { localStorage.setItem(ACCENT_CACHE_KEY, accent); } catch (e) {}
+  }
+  // Apply a cached colour immediately on load, before the database responds, to avoid a flash of default colours
+  (function applyCachedAppearance() {
+    var cached = null;
+    try { cached = localStorage.getItem(ACCENT_CACHE_KEY); } catch (e) {}
+    if (cached) { state.accentColor = cached; applyAppearance(); }
+  })();
+
+  var LOGO_CACHE_KEY = "pcfcKitStoreLogo";
+  function applyLogo() {
+    var img = byId("clubLogo");
+    if (!img) return;
+    if (state.logoDataUrl) {
+      img.src = state.logoDataUrl;
+      img.style.display = "";
+      try { localStorage.setItem(LOGO_CACHE_KEY, state.logoDataUrl); } catch (e) {}
+    } else {
+      img.removeAttribute("src");
+      img.style.display = "none";
+      try { localStorage.removeItem(LOGO_CACHE_KEY); } catch (e) {}
+    }
+  }
+  (function applyCachedLogo() {
+    var cached = null;
+    try { cached = localStorage.getItem(LOGO_CACHE_KEY); } catch (e) {}
+    if (cached) { state.logoDataUrl = cached; applyLogo(); }
+  })();
   function fmtDateTime(iso) {
     if (!iso) return "—";
     var d = new Date(iso);
@@ -694,6 +781,10 @@
         teams: (data && data.suggestTeams) || [],
         locations: (data && data.suggestLocations) || []
       };
+      state.accentColor = (data && data.accentColor) || null;
+      state.logoDataUrl = (data && data.logoDataUrl) || null;
+      applyAppearance();
+      applyLogo();
       state.ready.settings = true;
       onSettingsChange();
     }, dbErr);
@@ -738,7 +829,13 @@
     renderSuggestionDatalists();
     if (state.activeTab === "checkout") refreshAuthoriserSelect("coAuthoriser");
     if (state.activeTab === "checkin") refreshAuthoriserSelect("ciAuthoriser");
-    if (state.activeTab === "settings") { renderAuthoriserList(); renderSuggestionLists(); }
+    if (state.activeTab === "settings") {
+      renderAuthoriserList();
+      renderSuggestionLists();
+      renderLogoPreview();
+      var accentInput = byId("appAccent");
+      if (accentInput) accentInput.value = state.accentColor || "#2F6F52";
+    }
   }
 
   // ---------------------------------------------------------------
@@ -1578,7 +1675,25 @@
   function renderSettingsTab(main) {
     main.innerHTML =
       '<h2>Settings</h2>' +
-      '<p class="tab-desc">Manage the people who can appear in the \u201Cchecked out by\u201D / \u201Cchecked in by\u201D dropdowns, and the predictive suggestions offered when filling in borrower details.</p>' +
+      '<p class="tab-desc">Manage the people who can appear in the \u201Cchecked out by\u201D / \u201Cchecked in by\u201D dropdowns, the predictive suggestions offered when filling in borrower details, and the site\u2019s branding.</p>' +
+      '<div class="panel"><h3>Appearance</h3>' +
+        '<p class="tab-desc" style="margin-bottom:10px;">Pick a brand colour and it\u2019s used for buttons, the sidebar, and highlights across the site for everyone \u2014 status colours (in store / checked out / overdue) stay as they are so they\u2019re still easy to read at a glance.</p>' +
+        '<div class="field-row" style="align-items:flex-end;">' +
+          '<div class="field" style="flex:0 0 auto;"><label for="appAccent">Brand colour</label><input type="color" id="appAccent" value="' + esc(state.accentColor || "#2F6F52") + '" style="width:60px;height:40px;padding:2px;"></div>' +
+          '<div><button class="btn" id="appSave" type="button">Save colour</button></div>' +
+          '<div><button class="btn secondary" id="appReset" type="button">Reset to default</button></div>' +
+        '</div>' +
+        '<div id="appBanner"></div>' +
+      '</div>' +
+      '<div class="panel"><h3>Club badge</h3>' +
+        '<p class="tab-desc" style="margin-bottom:10px;">Drop a JPEG, PNG, or similar image in and it\u2019ll show next to the site title for everyone. Resized automatically so it stays quick to load.</p>' +
+        '<div class="dropzone" id="logoDropzone" tabindex="0">' +
+          '<div id="logoDropzoneText"><strong>Drop a badge here</strong>, or click to choose a file</div>' +
+          '<input type="file" id="logoFileInput" accept="image/png,image/jpeg,image/jpg,image/webp,image/gif,image/svg+xml" style="display:none;">' +
+        '</div>' +
+        '<div id="logoPreviewRow"></div>' +
+        '<div id="logoBanner"></div>' +
+      '</div>' +
       '<div class="panel"><h3>Authorisers</h3>' +
         '<div class="field-row">' +
           '<div class="field" style="flex:1;"><input type="text" id="authNew" placeholder="Add a name…"></div>' +
@@ -1597,6 +1712,157 @@
       var clearBtn = byId("clear_" + field);
       if (clearBtn) clearBtn.addEventListener("click", function () { clearSuggestions(field); });
     });
+    byId("appAccent").addEventListener("input", function () {
+      // live preview as they pick, before saving
+      var prev = state.accentColor;
+      state.accentColor = byId("appAccent").value;
+      applyAppearance();
+      state.accentColor = prev;
+    });
+    byId("appSave").addEventListener("click", saveAccentColor);
+    byId("appReset").addEventListener("click", resetAccentColor);
+    setupLogoDropzone();
+    renderLogoPreview();
+  }
+
+  // ---------------------------------------------------------------
+  // Club badge upload
+  // ---------------------------------------------------------------
+  var LOGO_MAX_DIMENSION = 240;
+  var LOGO_MAX_SOURCE_BYTES = 15 * 1024 * 1024; // 15MB — generous cap on the original file before we resize it
+
+  function setupLogoDropzone() {
+    var zone = byId("logoDropzone");
+    var input = byId("logoFileInput");
+    if (!zone || !input) return;
+    zone.addEventListener("click", function () { input.click(); });
+    zone.addEventListener("keydown", function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); input.click(); } });
+    input.addEventListener("change", function () { if (input.files && input.files[0]) handleLogoFile(input.files[0]); });
+    ["dragover", "dragenter"].forEach(function (evt) {
+      zone.addEventListener(evt, function (e) { e.preventDefault(); zone.classList.add("dragover"); });
+    });
+    ["dragleave", "dragend"].forEach(function (evt) {
+      zone.addEventListener(evt, function (e) { zone.classList.remove("dragover"); });
+    });
+    zone.addEventListener("drop", function (e) {
+      e.preventDefault();
+      zone.classList.remove("dragover");
+      var file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+      if (file) handleLogoFile(file);
+    });
+  }
+
+  function handleLogoFile(file) {
+    showBanner("logoBanner", "");
+    if (!/^image\//.test(file.type)) {
+      return showBanner("logoBanner", "That doesn\u2019t look like an image file — try a JPEG, PNG, WebP, GIF or SVG.");
+    }
+    if (file.size > LOGO_MAX_SOURCE_BYTES) {
+      return showBanner("logoBanner", "That file\u2019s a bit large — try something under 15MB.");
+    }
+    var textEl = byId("logoDropzoneText");
+    if (textEl) textEl.innerHTML = "Processing image…";
+
+    var reader = new FileReader();
+    reader.onerror = function () { showBanner("logoBanner", "Couldn\u2019t read that file. Please try again."); resetDropzoneText(); };
+    reader.onload = function () {
+      if (file.type === "image/svg+xml") {
+        // SVGs are already tiny and vector — store as-is rather than rasterizing
+        saveLogo(reader.result);
+        return;
+      }
+      var img = new Image();
+      img.onload = function () {
+        try {
+          var canvas = document.createElement("canvas");
+          var scale = Math.min(1, LOGO_MAX_DIMENSION / Math.max(img.width, img.height));
+          canvas.width = Math.max(1, Math.round(img.width * scale));
+          canvas.height = Math.max(1, Math.round(img.height * scale));
+          var ctx = canvas.getContext("2d");
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          var dataUrl = canvas.toDataURL("image/png");
+          saveLogo(dataUrl);
+        } catch (e) {
+          console.error(e);
+          showBanner("logoBanner", "Couldn\u2019t process that image. Please try a different file.");
+          resetDropzoneText();
+        }
+      };
+      img.onerror = function () { showBanner("logoBanner", "Couldn\u2019t read that image. Please try a different file."); resetDropzoneText(); };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function resetDropzoneText() {
+    var textEl = byId("logoDropzoneText");
+    if (textEl) textEl.innerHTML = '<strong>Drop a badge here</strong>, or click to choose a file';
+  }
+
+  async function saveLogo(dataUrl) {
+    if (!db) { showBanner("logoBanner", "Not connected to shared storage."); resetDropzoneText(); return; }
+    if (dataUrl.length > 900000) {
+      showBanner("logoBanner", "That image is still too large after resizing — try a simpler image.");
+      resetDropzoneText();
+      return;
+    }
+    try {
+      await settingsDoc.set({ logoDataUrl: dataUrl }, { merge: true });
+      toast("Club badge updated for everyone.");
+    } catch (e) {
+      console.error(e);
+      showBanner("logoBanner", "Couldn\u2019t save that image. Please try again.");
+    } finally {
+      resetDropzoneText();
+    }
+  }
+
+  async function removeLogo() {
+    if (!db) { toast("Not connected to shared storage.", true); return; }
+    try {
+      await settingsDoc.set({ logoDataUrl: null }, { merge: true });
+      toast("Club badge removed.");
+    } catch (e) {
+      console.error(e);
+      toast("Couldn\u2019t remove the badge.", true);
+    }
+  }
+
+  function renderLogoPreview() {
+    var row = byId("logoPreviewRow");
+    if (!row) return;
+    if (!state.logoDataUrl) { row.innerHTML = ""; return; }
+    row.innerHTML =
+      '<div class="logo-preview-row">' +
+        '<img src="' + state.logoDataUrl.replace(/"/g, "&quot;") + '" alt="Current club badge">' +
+        '<button class="btn secondary small" id="logoRemove" type="button">Remove badge</button>' +
+      '</div>';
+    byId("logoRemove").addEventListener("click", removeLogo);
+  }
+
+  async function saveAccentColor() {
+    if (!db) { toast("Not connected to shared storage.", true); return; }
+    var hex = byId("appAccent").value;
+    showBanner("appBanner", "");
+    try {
+      await settingsDoc.set({ accentColor: hex }, { merge: true });
+      toast("Colour scheme saved for everyone.");
+    } catch (e) {
+      console.error(e);
+      showBanner("appBanner", "Couldn\u2019t save that colour. Please try again.");
+    }
+  }
+
+  async function resetAccentColor() {
+    if (!db) { toast("Not connected to shared storage.", true); return; }
+    try {
+      await settingsDoc.set({ accentColor: null }, { merge: true });
+      byId("appAccent").value = "#2F6F52";
+      toast("Reset to the default colours.");
+    } catch (e) {
+      console.error(e);
+      toast("Couldn\u2019t reset the colour scheme.", true);
+    }
   }
 
   function suggestionSectionHtml(field, title) {
