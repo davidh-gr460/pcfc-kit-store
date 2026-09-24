@@ -1,0 +1,1356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>PCFC Kit Store</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
+<style>
+  :root {
+    --pitch-900: #12261F;
+    --pitch-800: #16302A;
+    --pitch-600: #2F6F52;
+    --pitch-500: #3A8763;
+    --chalk-100: #F6F4EE;
+    --chalk-200: #EDEAE0;
+    --line: #D8D3C6;
+    --ink: #1B231F;
+    --ink-soft: #5B6660;
+    --tag-amber: #B4671E;
+    --tag-amber-bg: #F7E9D8;
+    --tag-red: #A23B2B;
+    --tag-red-bg: #F6E0DB;
+    --tag-green-bg: #E3EEE6;
+    --card-bg: #FFFFFF;
+    --shadow: none;
+    --radius: 3px;
+    --focus: #2F6F52;
+
+    --bg: var(--chalk-100);
+    --text: var(--ink);
+    --text-soft: var(--ink-soft);
+    --panel: var(--card-bg);
+    --border: var(--line);
+    --sidebar-bg: var(--pitch-800);
+    --sidebar-text: #E9EEE9;
+    --sidebar-text-dim: #9CB0A5;
+    --accent: var(--pitch-600);
+    --accent-text: #FFFFFF;
+
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #101512;
+      --text: #EDEFEC;
+      --text-soft: #9AA69E;
+      --panel: #182019;
+      --border: #2C3730;
+      --sidebar-bg: #0D1512;
+      --sidebar-text: #E9EEE9;
+      --sidebar-text-dim: #7E9188;
+      --accent: #3A8763;
+      --accent-text: #06110C;
+      --tag-amber-bg: #3A2A12;
+      --tag-red-bg: #3A1B16;
+      --tag-green-bg: #16281C;
+      --tag-amber: #E0A868;
+      --tag-red: #E08A78;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #101512;
+    --text: #EDEFEC;
+    --text-soft: #9AA69E;
+    --panel: #182019;
+    --border: #2C3730;
+    --sidebar-bg: #0D1512;
+    --sidebar-text: #E9EEE9;
+    --sidebar-text-dim: #7E9188;
+    --accent: #3A8763;
+    --accent-text: #06110C;
+    --tag-amber-bg: #3A2A12;
+    --tag-red-bg: #3A1B16;
+    --tag-green-bg: #16281C;
+    --tag-amber: #E0A868;
+    --tag-red: #E08A78;
+  }
+
+  * { box-sizing: border-box; }
+  html, body {
+    height: 100%;
+    margin: 0;
+  }
+  html { scroll-padding-top: env(safe-area-inset-top, 0px); }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    -webkit-font-smoothing: antialiased;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    * { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+  }
+  h1, h2, h3, .label-font {
+    font-family: 'Oswald', 'Inter', system-ui, sans-serif;
+    letter-spacing: 0.01em;
+  }
+  .mono { font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; }
+
+  a { color: inherit; }
+  button, input, select, textarea { font-family: inherit; font-size: 1rem; color: inherit; }
+  button { cursor: pointer; }
+  :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+  #app { min-height: 100%; display: flex; flex-direction: column; }
+
+  /* ---- Top bar ---- */
+  .topbar {
+    background: var(--sidebar-bg);
+    color: var(--sidebar-text);
+    padding: 14px 20px;
+    padding-top: calc(14px + env(safe-area-inset-top, 0px));
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    border-bottom: 3px solid var(--pitch-600);
+  }
+  .topbar .club {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+  }
+  .topbar h1 {
+    margin: 0;
+    font-size: 1.25rem;
+    font-weight: 600;
+  }
+  .topbar .sub {
+    font-size: 0.8rem;
+    color: var(--sidebar-text-dim);
+  }
+  .stat-strip {
+    display: flex;
+    gap: 18px;
+    font-size: 0.82rem;
+  }
+  .stat-strip .stat { display: flex; flex-direction: column; align-items: flex-end; }
+  .stat-strip .num { font-family: 'Oswald', sans-serif; font-size: 1.15rem; line-height: 1; }
+  .stat-strip .stat.overdue .num { color: #E08A78; }
+
+  /* ---- Layout ---- */
+  .shell {
+    flex: 1;
+    display: flex;
+    min-height: 0;
+  }
+  nav.sidebar {
+    background: var(--sidebar-bg);
+    color: var(--sidebar-text);
+    width: 190px;
+    flex-shrink: 0;
+    padding: 14px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  nav.sidebar button {
+    background: transparent;
+    border: none;
+    color: var(--sidebar-text-dim);
+    text-align: left;
+    padding: 10px 12px;
+    border-radius: var(--radius);
+    font-size: 0.92rem;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  nav.sidebar button:hover { background: rgba(255,255,255,0.06); color: var(--sidebar-text); }
+  nav.sidebar button.active { background: var(--pitch-600); color: #fff; }
+  nav.sidebar button .count {
+    margin-left: auto;
+    font-size: 0.72rem;
+    opacity: 0.85;
+  }
+
+  main {
+    flex: 1;
+    padding: 22px 26px 60px;
+    overflow-y: auto;
+    min-width: 0;
+  }
+  main h2 {
+    margin: 0 0 4px;
+    font-size: 1.4rem;
+    font-weight: 600;
+  }
+  main .tab-desc { color: var(--text-soft); font-size: 0.92rem; margin: 0 0 20px; max-width: 60ch; }
+
+  /* mobile tab bar */
+  .mobile-tabs { display: none; }
+
+  @media (max-width: 820px) {
+    .shell { flex-direction: column; }
+    nav.sidebar {
+      display: none;
+    }
+    .mobile-tabs {
+      display: flex;
+      overflow-x: auto;
+      background: var(--sidebar-bg);
+      padding: 8px 10px;
+      gap: 6px;
+      -webkit-overflow-scrolling: touch;
+    }
+    .mobile-tabs button {
+      background: transparent;
+      border: 1px solid rgba(255,255,255,0.15);
+      color: var(--sidebar-text-dim);
+      padding: 7px 12px;
+      border-radius: 999px;
+      font-size: 0.82rem;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    .mobile-tabs button.active { background: var(--pitch-600); color: #fff; border-color: transparent; }
+    main { padding: 18px 16px 50px; }
+    .topbar { flex-wrap: wrap; }
+    .stat-strip { gap: 12px; }
+  }
+
+  /* ---- Panels & cards ---- */
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-top: 3px solid var(--pitch-600);
+    border-radius: var(--radius);
+    padding: 18px 20px;
+    margin-bottom: 20px;
+  }
+  .panel h3 {
+    margin: 0 0 14px;
+    font-size: 1.02rem;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  @media (max-width: 980px) { .grid-2 { grid-template-columns: 1fr; } }
+
+  /* ---- Forms ---- */
+  .field { margin-bottom: 13px; }
+  .field label {
+    display: block;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text-soft);
+    margin-bottom: 5px;
+  }
+  .field input, .field select, .field textarea {
+    width: 100%;
+    padding: 9px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg);
+    color: var(--text);
+  }
+  .field .hint { font-size: 0.75rem; color: var(--text-soft); margin-top: 4px; }
+  .field-row { display: flex; gap: 12px; }
+  .field-row .field { flex: 1; }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--accent);
+    color: var(--accent-text);
+    border: none;
+    padding: 10px 18px;
+    border-radius: var(--radius);
+    font-weight: 600;
+    font-size: 0.92rem;
+  }
+  .btn:hover { filter: brightness(1.08); }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn.secondary {
+    background: transparent;
+    color: var(--text);
+    border: 1px solid var(--border);
+  }
+  .btn.danger { background: var(--tag-red); color: #fff; }
+  .btn.small { padding: 6px 11px; font-size: 0.8rem; }
+
+  /* ---- Tables ---- */
+  table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+  th {
+    text-align: left;
+    font-weight: 600;
+    color: var(--text-soft);
+    font-size: 0.75rem;
+    border-bottom: 1px solid var(--border);
+    padding: 6px 10px;
+  }
+  td { padding: 9px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+  .table-wrap { overflow-x: auto; }
+  .empty-row td { color: var(--text-soft); font-style: italic; padding: 18px 10px; }
+
+  .tag-chip {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 700;
+    font-size: 0.78rem;
+    padding: 2px 7px;
+    border-radius: 3px;
+    background: var(--chalk-200);
+    border: 1px solid var(--border);
+    white-space: nowrap;
+  }
+  .status-chip {
+    font-size: 0.72rem;
+    font-weight: 600;
+    padding: 3px 8px;
+    border-radius: 999px;
+    white-space: nowrap;
+  }
+  .status-chip.in-store { background: var(--tag-green-bg); color: var(--pitch-600); }
+  .status-chip.checked-out { background: var(--tag-amber-bg); color: var(--tag-amber); }
+  .status-chip.overdue { background: var(--tag-red-bg); color: var(--tag-red); }
+
+  /* ---- Picker list (checkout/checkin equipment select) ---- */
+  .picker { border: 1px solid var(--border); border-radius: var(--radius); max-height: 260px; overflow-y: auto; }
+  .picker-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .picker-item:last-child { border-bottom: none; }
+  .picker-item.selected { background: var(--tag-green-bg); }
+  .picker-item .info { min-width: 0; }
+  .picker-item .info .t { font-weight: 600; font-size: 0.9rem; }
+  .picker-item .info .m { font-size: 0.78rem; color: var(--text-soft); }
+  .picker-empty { padding: 20px 12px; color: var(--text-soft); font-style: italic; font-size: 0.88rem; }
+
+  /* ---- Signature ---- */
+  .sig-wrap { border: 1px solid var(--border); border-radius: var(--radius); background: #fff; touch-action: none; }
+  canvas#sigCanvas { display: block; width: 100%; height: 150px; cursor: crosshair; }
+  .sig-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; }
+  .agreement {
+    font-size: 0.82rem;
+    color: var(--text-soft);
+    background: var(--chalk-200);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 10px 12px;
+    margin-bottom: 12px;
+  }
+  .agreement label { display: flex; gap: 8px; align-items: flex-start; font-size: 0.85rem; color: var(--text); cursor: pointer; }
+  .agreement input[type="checkbox"] { width: auto; margin-top: 3px; }
+
+  /* ---- Banners / toast ---- */
+  .banner { padding: 10px 14px; border-radius: var(--radius); font-size: 0.86rem; margin-bottom: 14px; }
+  .banner.error { background: var(--tag-red-bg); color: var(--tag-red); }
+  .banner.info { background: var(--tag-amber-bg); color: var(--tag-amber); }
+
+  #toast {
+    position: fixed;
+    bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+    left: 50%;
+    transform: translateX(-50%) translateY(20px);
+    background: var(--pitch-800);
+    color: #fff;
+    padding: 11px 20px;
+    border-radius: 999px;
+    font-size: 0.86rem;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease, transform 0.2s ease;
+    z-index: 50;
+    max-width: 90vw;
+    text-align: center;
+  }
+  #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  #toast.err { background: var(--tag-red); }
+
+  .conn-block {
+    position: fixed;
+    inset: 0;
+    background: var(--bg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+    padding: 20px;
+    text-align: center;
+  }
+  .conn-block .box { max-width: 380px; }
+  .conn-block h2 { margin-bottom: 8px; }
+  .conn-block p { color: var(--text-soft); font-size: 0.9rem; }
+
+  .authoriser-row, .team-tag-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 4px;
+    border-bottom: 1px solid var(--border);
+    font-size: 0.9rem;
+  }
+  .authoriser-row:last-child { border-bottom: none; }
+
+  .icon-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-soft);
+    padding: 4px 8px;
+    border-radius: var(--radius);
+    font-size: 0.9rem;
+  }
+  .icon-btn:hover { color: var(--tag-red); background: var(--tag-red-bg); }
+</style>
+</head>
+<body>
+
+<div id="app">
+  <div class="topbar">
+    <div class="club">
+      <h1>PCFC Kit Store</h1>
+      <span class="sub">Equipment check-out register</span>
+    </div>
+    <div class="stat-strip" id="statStrip"></div>
+  </div>
+
+  <div class="mobile-tabs" id="mobileTabs"></div>
+
+  <div class="shell">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main id="main"></main>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+(function () {
+  "use strict";
+
+  // ---------------------------------------------------------------
+  // Tabs
+  // ---------------------------------------------------------------
+  var TABS = [
+    { id: "dashboard", label: "Dashboard" },
+    { id: "checkout",  label: "Check Out" },
+    { id: "checkin",   label: "Check In" },
+    { id: "history",   label: "History" },
+    { id: "equipment", label: "Equipment" },
+    { id: "settings",  label: "Settings" }
+  ];
+
+  var state = {
+    activeTab: "dashboard",
+    equipment: [],      // {id, type, quantity, size, colour, idTag, status, currentCheckoutId}
+    checkouts: [],       // {id, ...}
+    checkins: [],
+    authorisers: [],
+    ready: { equipment: false, checkouts: false, checkins: false, settings: false }
+  };
+
+  var db = null;
+  var equipmentCol, checkoutsCol, checkinsCol, settingsDoc;
+
+  // Transient per-tab local form state (kept out of full re-renders)
+  var checkoutForm = { equipmentId: null, hasSig: false };
+  var checkinForm = { equipmentId: null };
+
+  // ---------------------------------------------------------------
+  // Utilities
+  // ---------------------------------------------------------------
+  function esc(s) {
+    if (s === null || s === undefined) return "";
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c];
+    });
+  }
+  function todayISODate() {
+    var d = new Date();
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+  }
+  function nowLocalDatetimeValue() {
+    var d = new Date();
+    var pad = function (n) { return String(n).padStart(2, "0"); };
+    return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()) + "T" + pad(d.getHours()) + ":" + pad(d.getMinutes());
+  }
+  function plusDaysISODate(n) {
+    var d = new Date();
+    d.setDate(d.getDate() + n);
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+  }
+  function fmtDateTime(iso) {
+    if (!iso) return "—";
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) return esc(iso);
+    return d.toLocaleDateString(undefined, { day: "2-digit", month: "short" }) + " " + d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+  }
+  function fmtDate(iso) {
+    if (!iso) return "—";
+    var d = new Date(iso + "T00:00:00");
+    if (isNaN(d.getTime())) return esc(iso);
+    return d.toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" });
+  }
+  function isOverdue(dueDate) {
+    if (!dueDate) return false;
+    return dueDate < todayISODate();
+  }
+  function toast(msg, isErr) {
+    var el = document.getElementById("toast");
+    el.textContent = msg;
+    el.className = isErr ? "show err" : "show";
+    clearTimeout(toast._t);
+    toast._t = setTimeout(function () { el.className = ""; }, 3200);
+  }
+  function byId(id) { return document.getElementById(id); }
+
+  function equipmentById(id) {
+    for (var i = 0; i < state.equipment.length; i++) if (state.equipment[i].id === id) return state.equipment[i];
+    return null;
+  }
+  function checkoutById(id) {
+    for (var i = 0; i < state.checkouts.length; i++) if (state.checkouts[i].id === id) return state.checkouts[i];
+    return null;
+  }
+
+  // ---------------------------------------------------------------
+  // DB bootstrap — Firebase Firestore
+  // ---------------------------------------------------------------
+  var firebaseConfig = {
+    apiKey: "AIzaSyA_XHsNCCX8KjYNC60rdjf2aQmXoRi-Zic",
+    authDomain: "pcfc-kit-store.firebaseapp.com",
+    projectId: "pcfc-kit-store",
+    storageBucket: "pcfc-kit-store.firebasestorage.app",
+    messagingSenderId: "272014599560",
+    appId: "1:272014599560:web:f5931801ecbf23fdc0c63d"
+  };
+
+  async function initDb() {
+    try {
+      if (!window.firebase) throw new Error("Firebase SDK did not load");
+      firebase.initializeApp(firebaseConfig);
+      db = firebase.firestore();
+    } catch (e) {
+      console.error(e);
+      db = null;
+    }
+    if (!db) {
+      showConnFail();
+      return;
+    }
+    equipmentCol = db.collection("equipment");
+    checkoutsCol = db.collection("checkouts");
+    checkinsCol = db.collection("checkins");
+    settingsDoc = db.doc("config/settings");
+
+    equipmentCol.onSnapshot(function (snap) {
+      state.equipment = snap.docs.map(function (d) { return Object.assign({ id: d.id }, d.data()); });
+      state.ready.equipment = true;
+      onEquipmentChange();
+    }, dbErr);
+
+    checkoutsCol.onSnapshot(function (snap) {
+      state.checkouts = snap.docs.map(function (d) { return Object.assign({ id: d.id }, d.data()); });
+      state.ready.checkouts = true;
+      onCheckoutsChange();
+    }, dbErr);
+
+    checkinsCol.onSnapshot(function (snap) {
+      state.checkins = snap.docs.map(function (d) { return Object.assign({ id: d.id }, d.data()); });
+      state.ready.checkins = true;
+      onCheckinsChange();
+    }, dbErr);
+
+    settingsDoc.onSnapshot(function (snap) {
+      var data = snap.exists ? snap.data() : {};
+      state.authorisers = (data && data.authorisers) || [];
+      state.ready.settings = true;
+      onSettingsChange();
+    }, dbErr);
+  }
+
+  function dbErr(e) {
+    console.error("db error", e);
+    toast("Lost connection to the equipment database. Check your internet connection.", true);
+  }
+
+  function showConnFail() {
+    var block = document.createElement("div");
+    block.className = "conn-block";
+    block.innerHTML =
+      '<div class="box"><h2>Can\u2019t connect to the equipment database</h2>' +
+      '<p>Check your internet connection and reload the page. If this keeps happening, the Firebase project may need checking.</p></div>';
+    document.body.appendChild(block);
+  }
+
+  // ---------------------------------------------------------------
+  // Reactions to snapshot changes — targeted, not full-tab re-renders
+  // ---------------------------------------------------------------
+  function onEquipmentChange() {
+    renderStatStrip();
+    renderSidebarCounts();
+    if (state.activeTab === "dashboard") renderDashboardTables();
+    if (state.activeTab === "checkout") renderCheckoutPicker();
+    if (state.activeTab === "checkin") renderCheckinPicker();
+    if (state.activeTab === "equipment") renderEquipmentTable();
+  }
+  function onCheckoutsChange() {
+    renderStatStrip();
+    renderSidebarCounts();
+    if (state.activeTab === "dashboard") renderDashboardTables();
+    if (state.activeTab === "checkin") renderCheckinPicker();
+    if (state.activeTab === "history") renderHistoryTable();
+  }
+  function onCheckinsChange() {
+    if (state.activeTab === "history") renderHistoryTable();
+  }
+  function onSettingsChange() {
+    if (state.activeTab === "checkout") refreshAuthoriserSelect("coAuthoriser");
+    if (state.activeTab === "checkin") refreshAuthoriserSelect("ciAuthoriser");
+    if (state.activeTab === "settings") renderAuthoriserList();
+  }
+
+  // ---------------------------------------------------------------
+  // Shell: topbar stats, sidebar, mobile tabs
+  // ---------------------------------------------------------------
+  function renderStatStrip() {
+    var inStore = state.equipment.filter(function (e) { return e.status === "in_store"; }).length;
+    var out = state.equipment.filter(function (e) { return e.status === "checked_out"; }).length;
+    var overdue = state.checkouts.filter(function (c) { return c.status === "open" && isOverdue(c.dueDate); }).length;
+    byId("statStrip").innerHTML =
+      '<div class="stat"><span class="num">' + inStore + '</span><span>in store</span></div>' +
+      '<div class="stat"><span class="num">' + out + '</span><span>checked out</span></div>' +
+      '<div class="stat overdue"><span class="num">' + overdue + '</span><span>overdue</span></div>';
+  }
+
+  function tabCount(tabId) {
+    if (tabId === "checkout") return state.equipment.filter(function (e) { return e.status === "in_store"; }).length;
+    if (tabId === "checkin") return state.equipment.filter(function (e) { return e.status === "checked_out"; }).length;
+    return null;
+  }
+
+  function renderSidebarCounts() {
+    TABS.forEach(function (t) {
+      var c = tabCount(t.id);
+      [byId("nav_" + t.id), byId("mnav_" + t.id)].forEach(function (el) {
+        if (!el) return;
+        var countEl = el.querySelector(".count");
+        if (countEl) countEl.textContent = c === null ? "" : c;
+      });
+    });
+  }
+
+  function renderNav() {
+    var sidebar = byId("sidebar");
+    sidebar.innerHTML = TABS.map(function (t) {
+      return '<button id="nav_' + t.id + '" data-tab="' + t.id + '" class="' + (state.activeTab === t.id ? "active" : "") + '">' +
+        esc(t.label) + '<span class="count"></span></button>';
+    }).join("");
+    Array.prototype.forEach.call(sidebar.querySelectorAll("button"), function (b) {
+      b.addEventListener("click", function () { switchTab(b.getAttribute("data-tab")); });
+    });
+
+    var mtabs = byId("mobileTabs");
+    mtabs.innerHTML = TABS.map(function (t) {
+      return '<button id="mnav_' + t.id + '" data-tab="' + t.id + '" class="' + (state.activeTab === t.id ? "active" : "") + '">' + esc(t.label) + '</button>';
+    }).join("");
+    Array.prototype.forEach.call(mtabs.querySelectorAll("button"), function (b) {
+      b.addEventListener("click", function () { switchTab(b.getAttribute("data-tab")); });
+    });
+
+    renderSidebarCounts();
+  }
+
+  function switchTab(tabId) {
+    state.activeTab = tabId;
+    renderNav();
+    renderMain();
+  }
+
+  // ---------------------------------------------------------------
+  // Main router
+  // ---------------------------------------------------------------
+  function renderMain() {
+    var main = byId("main");
+    if (tabRenderers[state.activeTab]) {
+      tabRenderers[state.activeTab](main);
+    }
+  }
+
+  var tabRenderers = {
+    dashboard: renderDashboardTab,
+    checkout: renderCheckoutTab,
+    checkin: renderCheckinTab,
+    history: renderHistoryTab,
+    equipment: renderEquipmentTab,
+    settings: renderSettingsTab
+  };
+
+  // =================================================================
+  // DASHBOARD
+  // =================================================================
+  function renderDashboardTab(main) {
+    main.innerHTML =
+      '<h2>Dashboard</h2>' +
+      '<p class="tab-desc">Live view of everything in the store and everything currently out with a team or player.</p>' +
+      '<div class="grid-2">' +
+        '<div class="panel"><h3>In store</h3><div class="table-wrap" id="inStoreTableWrap"></div></div>' +
+        '<div class="panel"><h3>Checked out</h3><div class="table-wrap" id="checkedOutTableWrap"></div></div>' +
+      '</div>';
+    renderDashboardTables();
+  }
+
+  function renderDashboardTables() {
+    var inStoreWrap = byId("inStoreTableWrap");
+    var outWrap = byId("checkedOutTableWrap");
+    if (!inStoreWrap || !outWrap) return;
+
+    var inStore = state.equipment.filter(function (e) { return e.status === "in_store"; })
+      .sort(function (a, b) { return (a.type || "").localeCompare(b.type || ""); });
+
+    if (!state.ready.equipment) {
+      inStoreWrap.innerHTML = '<p class="tab-desc">Loading…</p>';
+    } else if (!inStore.length) {
+      inStoreWrap.innerHTML = '<p class="tab-desc">Nothing in store yet. Add items on the Equipment tab.</p>';
+    } else {
+      inStoreWrap.innerHTML =
+        '<table><thead><tr><th>Type</th><th>Size</th><th>Colour</th><th>Qty</th><th>ID tag</th></tr></thead><tbody>' +
+        inStore.map(function (e) {
+          return '<tr><td>' + esc(e.type) + '</td><td>' + esc(e.size || "—") + '</td><td>' + esc(e.colour || "—") + '</td><td>' + esc(e.quantity != null ? e.quantity : "—") + '</td><td><span class="tag-chip">' + esc(e.idTag) + '</span></td></tr>';
+        }).join("") + '</tbody></table>';
+    }
+
+    var checkedOut = state.equipment.filter(function (e) { return e.status === "checked_out"; });
+    if (!state.ready.equipment || !state.ready.checkouts) {
+      outWrap.innerHTML = '<p class="tab-desc">Loading…</p>';
+    } else if (!checkedOut.length) {
+      outWrap.innerHTML = '<p class="tab-desc">Nothing checked out right now.</p>';
+    } else {
+      outWrap.innerHTML =
+        '<table><thead><tr><th>Item</th><th>Held by</th><th>Team</th><th>Due back</th></tr></thead><tbody>' +
+        checkedOut.map(function (e) {
+          var co = checkoutById(e.currentCheckoutId);
+          var overdue = co && isOverdue(co.dueDate);
+          return '<tr>' +
+            '<td>' + esc(e.type) + '<br><span class="tag-chip">' + esc(e.idTag) + '</span></td>' +
+            '<td>' + (co ? esc(co.name) : "—") + '</td>' +
+            '<td>' + (co ? esc(co.team) : "—") + '</td>' +
+            '<td>' + (co ? (overdue ? '<span class="status-chip overdue">Overdue · ' + esc(fmtDate(co.dueDate)) + '</span>' : esc(fmtDate(co.dueDate))) : "—") + '</td>' +
+            '</tr>';
+        }).join("") + '</tbody></table>';
+    }
+  }
+
+  // =================================================================
+  // CHECK OUT
+  // =================================================================
+  function renderCheckoutTab(main) {
+    checkoutForm.equipmentId = null;
+    checkoutForm.hasSig = false;
+    main.innerHTML =
+      '<h2>Check equipment out</h2>' +
+      '<p class="tab-desc">Pick an item that\u2019s in store, record who\u2019s taking it, and capture their signature.</p>' +
+      '<div class="grid-2">' +
+        '<div class="panel"><h3>1. Choose an item</h3>' +
+          '<div class="field"><input type="text" id="coSearch" placeholder="Search by type or ID tag…"></div>' +
+          '<div class="picker" id="coEquipmentList"></div>' +
+        '</div>' +
+        '<div class="panel"><h3>2. Borrower details</h3>' +
+          '<div class="field"><label for="coName">Name</label><input type="text" id="coName" placeholder="Who\u2019s taking it"></div>' +
+          '<div class="field-row">' +
+            '<div class="field"><label for="coTeam">Team</label><input type="text" id="coTeam" placeholder="e.g. Ladies Firsts"></div>' +
+            '<div class="field"><label for="coLocation">Location used at</label><input type="text" id="coLocation" placeholder="e.g. Purston playing fields"></div>' +
+          '</div>' +
+          '<div class="field-row">' +
+            '<div class="field"><label for="coTime">Check-out time</label><input type="datetime-local" id="coTime"></div>' +
+            '<div class="field"><label for="coDue">Check-in due date</label><input type="date" id="coDue"></div>' +
+          '</div>' +
+          '<div class="field"><label for="coAuthoriser">Checked out by</label><select id="coAuthoriser"></select></div>' +
+          '<div id="coBanner"></div>' +
+        '</div>' +
+      '</div>' +
+      '<div class="panel"><h3>3. Signature</h3>' +
+        '<div class="agreement">By signing below, I confirm I am taking responsibility for the safe return of this equipment, and that I will replace any missing or damaged item(s) at my own expense if it is not returned in the same condition.</div>' +
+        '<div class="sig-wrap"><canvas id="sigCanvas"></canvas></div>' +
+        '<div class="sig-actions">' +
+          '<button class="btn secondary small" id="sigClear" type="button">Clear signature</button>' +
+          '<label style="display:flex;align-items:center;gap:8px;font-size:0.85rem;"><input type="checkbox" id="coAgree" style="width:auto;"> I have read and accept the terms above</label>' +
+        '</div>' +
+        '<div style="margin-top:16px;"><button class="btn" id="coSubmit" type="button">Complete check-out</button></div>' +
+      '</div>';
+
+    byId("coTime").value = nowLocalDatetimeValue();
+    byId("coDue").value = plusDaysISODate(7);
+    refreshAuthoriserSelect("coAuthoriser");
+    renderCheckoutPicker();
+    setupSignaturePad("sigCanvas", "sigClear", function (drawn) { checkoutForm.hasSig = drawn; });
+
+    byId("coSearch").addEventListener("input", renderCheckoutPicker);
+    byId("coSubmit").addEventListener("click", submitCheckout);
+  }
+
+  function renderCheckoutPicker() {
+    var list = byId("coEquipmentList");
+    if (!list) return;
+    var q = (byId("coSearch") && byId("coSearch").value || "").toLowerCase().trim();
+    var items = state.equipment.filter(function (e) { return e.status === "in_store"; });
+    if (q) {
+      items = items.filter(function (e) {
+        return (e.type || "").toLowerCase().indexOf(q) > -1 || (e.idTag || "").toLowerCase().indexOf(q) > -1;
+      });
+    }
+    if (checkoutForm.equipmentId && !equipmentById(checkoutForm.equipmentId)) checkoutForm.equipmentId = null;
+    if (checkoutForm.equipmentId) {
+      var still = items.some(function (e) { return e.id === checkoutForm.equipmentId; });
+      if (!still) checkoutForm.equipmentId = null;
+    }
+
+    if (!state.ready.equipment) {
+      list.innerHTML = '<div class="picker-empty">Loading…</div>';
+      return;
+    }
+    if (!items.length) {
+      list.innerHTML = '<div class="picker-empty">' + (q ? "No matching items in store." : "Nothing in store to check out.") + '</div>';
+      return;
+    }
+    list.innerHTML = items.map(function (e) {
+      var sel = e.id === checkoutForm.equipmentId;
+      return '<div class="picker-item' + (sel ? ' selected' : '') + '" data-id="' + esc(e.id) + '">' +
+        '<div class="info"><div class="t">' + esc(e.type) + '</div><div class="m">' + [e.size, e.colour].filter(Boolean).map(esc).join(" · ") + '</div></div>' +
+        '<span class="tag-chip">' + esc(e.idTag) + '</span>' +
+        '</div>';
+    }).join("");
+    Array.prototype.forEach.call(list.querySelectorAll(".picker-item"), function (row) {
+      row.addEventListener("click", function () {
+        checkoutForm.equipmentId = row.getAttribute("data-id");
+        renderCheckoutPicker();
+      });
+    });
+  }
+
+  function refreshAuthoriserSelect(selectId) {
+    var sel = byId(selectId);
+    if (!sel) return;
+    var prev = sel.value;
+    if (!state.authorisers.length) {
+      sel.innerHTML = '<option value="">No authorisers set up — add them in Settings</option>';
+      sel.disabled = true;
+      return;
+    }
+    sel.disabled = false;
+    sel.innerHTML = state.authorisers.map(function (a) { return '<option value="' + esc(a) + '">' + esc(a) + '</option>'; }).join("");
+    if (prev && state.authorisers.indexOf(prev) > -1) sel.value = prev;
+  }
+
+  function showBanner(elId, msg, kind) {
+    var el = byId(elId);
+    if (!el) return;
+    if (!msg) { el.innerHTML = ""; return; }
+    el.innerHTML = '<div class="banner ' + (kind || "error") + '">' + esc(msg) + '</div>';
+  }
+
+  async function submitCheckout() {
+    showBanner("coBanner", "");
+    if (!db) { toast("Not connected to shared storage.", true); return; }
+    if (!checkoutForm.equipmentId) { showBanner("coBanner", "Choose an item to check out first."); return; }
+    var name = byId("coName").value.trim();
+    var team = byId("coTeam").value.trim();
+    var location = byId("coLocation").value.trim();
+    var time = byId("coTime").value;
+    var due = byId("coDue").value;
+    var authoriser = byId("coAuthoriser").value;
+    var agreed = byId("coAgree").checked;
+
+    if (!name) return showBanner("coBanner", "Enter the borrower\u2019s name.");
+    if (!team) return showBanner("coBanner", "Enter the team.");
+    if (!location) return showBanner("coBanner", "Enter the location it\u2019ll be used at.");
+    if (!time) return showBanner("coBanner", "Set the check-out time.");
+    if (!due) return showBanner("coBanner", "Set a check-in due date.");
+    if (!authoriser) return showBanner("coBanner", "Choose who\u2019s checking it out (add authorisers in Settings if the list is empty).");
+    if (!checkoutForm.hasSig) return showBanner("coBanner", "Get a signature before completing the check-out.");
+    if (!agreed) return showBanner("coBanner", "Tick the box to confirm the terms have been accepted.");
+
+    var btn = byId("coSubmit");
+    btn.disabled = true;
+    try {
+      var eqRef = equipmentCol.doc(checkoutForm.equipmentId);
+      var snap = await eqRef.get();
+      if (!snap.exists || snap.data().status !== "in_store") {
+        showBanner("coBanner", "This item was just checked out by someone else. Pick another item.");
+        checkoutForm.equipmentId = null;
+        renderCheckoutPicker();
+        return;
+      }
+      var eqData = snap.data();
+      var sigData = byId("sigCanvas").toDataURL("image/png");
+      var checkoutRef = checkoutsCol.doc();
+      var nowIso = new Date().toISOString();
+
+      await eqRef.update({ status: "checked_out", currentCheckoutId: checkoutRef.id });
+      await checkoutRef.set({
+        equipmentId: checkoutForm.equipmentId,
+        equipmentSnapshot: { type: eqData.type, size: eqData.size || "", colour: eqData.colour || "", idTag: eqData.idTag },
+        name: name, team: team, location: location,
+        checkOutTime: new Date(time).toISOString(),
+        dueDate: due,
+        checkedOutBy: authoriser,
+        signature: sigData,
+        status: "open",
+        checkinId: null,
+        createdAt: nowIso
+      });
+
+      toast("Checked out: " + eqData.type + " (" + eqData.idTag + ") to " + name);
+      renderCheckoutTab(byId("main"));
+    } catch (e) {
+      console.error(e);
+      showBanner("coBanner", "Something went wrong saving the check-out. Please try again.");
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  // =================================================================
+  // CHECK IN
+  // =================================================================
+  function renderCheckinTab(main) {
+    checkinForm.equipmentId = null;
+    main.innerHTML =
+      '<h2>Check equipment in</h2>' +
+      '<p class="tab-desc">Find the item by its ID tag or type — anyone can check something back in, they don\u2019t need to be the person who took it out.</p>' +
+      '<div class="grid-2">' +
+        '<div class="panel"><h3>1. Choose an item</h3>' +
+          '<div class="field"><input type="text" id="ciSearch" placeholder="Search by type or ID tag…"></div>' +
+          '<div class="picker" id="ciEquipmentList"></div>' +
+        '</div>' +
+        '<div class="panel"><h3>2. Confirm the return</h3><div id="ciDetails">' +
+          '<p class="tab-desc">Select a checked-out item to see who has it.</p>' +
+          '</div></div>' +
+      '</div>';
+    renderCheckinPicker();
+    byId("ciSearch").addEventListener("input", renderCheckinPicker);
+  }
+
+  function renderCheckinPicker() {
+    var list = byId("ciEquipmentList");
+    if (!list) return;
+    var q = (byId("ciSearch") && byId("ciSearch").value || "").toLowerCase().trim();
+    var items = state.equipment.filter(function (e) { return e.status === "checked_out"; });
+    if (q) {
+      items = items.filter(function (e) {
+        return (e.type || "").toLowerCase().indexOf(q) > -1 || (e.idTag || "").toLowerCase().indexOf(q) > -1;
+      });
+    }
+    if (checkinForm.equipmentId && !items.some(function (e) { return e.id === checkinForm.equipmentId; })) {
+      checkinForm.equipmentId = null;
+    }
+
+    if (!state.ready.equipment) {
+      list.innerHTML = '<div class="picker-empty">Loading…</div>';
+      return;
+    }
+    if (!items.length) {
+      list.innerHTML = '<div class="picker-empty">' + (q ? "No matching checked-out items." : "Nothing is checked out.") + '</div>';
+      renderCheckinDetails();
+      return;
+    }
+    list.innerHTML = items.map(function (e) {
+      var sel = e.id === checkinForm.equipmentId;
+      var co = checkoutById(e.currentCheckoutId);
+      return '<div class="picker-item' + (sel ? ' selected' : '') + '" data-id="' + esc(e.id) + '">' +
+        '<div class="info"><div class="t">' + esc(e.type) + '</div><div class="m">' + (co ? "with " + esc(co.name) : "") + '</div></div>' +
+        '<span class="tag-chip">' + esc(e.idTag) + '</span>' +
+        '</div>';
+    }).join("");
+    Array.prototype.forEach.call(list.querySelectorAll(".picker-item"), function (row) {
+      row.addEventListener("click", function () {
+        checkinForm.equipmentId = row.getAttribute("data-id");
+        renderCheckinPicker();
+        renderCheckinDetails();
+      });
+    });
+    renderCheckinDetails();
+  }
+
+  function renderCheckinDetails() {
+    var wrap = byId("ciDetails");
+    if (!wrap) return;
+    if (!checkinForm.equipmentId) {
+      wrap.innerHTML = '<p class="tab-desc">Select a checked-out item to see who has it.</p>';
+      return;
+    }
+    var eq = equipmentById(checkinForm.equipmentId);
+    var co = eq ? checkoutById(eq.currentCheckoutId) : null;
+    if (!eq || !co) {
+      wrap.innerHTML = '<p class="tab-desc">Select a checked-out item to see who has it.</p>';
+      return;
+    }
+    wrap.innerHTML =
+      '<div class="banner info">Checked out to <strong>' + esc(co.name) + '</strong> (' + esc(co.team) + ') on ' + esc(fmtDateTime(co.checkOutTime)) + (isOverdue(co.dueDate) ? ' — <strong>overdue</strong>, was due ' + esc(fmtDate(co.dueDate)) : '') + '</div>' +
+      '<div class="field-row">' +
+        '<div class="field"><label for="ciName">Name</label><input type="text" id="ciName" value="' + esc(co.name) + '"></div>' +
+        '<div class="field"><label for="ciTeam">Team</label><input type="text" id="ciTeam" value="' + esc(co.team) + '"></div>' +
+      '</div>' +
+      '<div class="field"><label for="ciLocation">Location used at</label><input type="text" id="ciLocation" value="' + esc(co.location) + '"></div>' +
+      '<div class="field-row">' +
+        '<div class="field"><label for="ciTime">Check-in time</label><input type="datetime-local" id="ciTime"></div>' +
+        '<div class="field"><label for="ciAuthoriser">Checked in by</label><select id="ciAuthoriser"></select></div>' +
+      '</div>' +
+      '<div id="ciBanner"></div>' +
+      '<button class="btn" id="ciSubmit" type="button">Complete check-in</button>';
+    byId("ciTime").value = nowLocalDatetimeValue();
+    refreshAuthoriserSelect("ciAuthoriser");
+    byId("ciSubmit").addEventListener("click", submitCheckin);
+  }
+
+  async function submitCheckin() {
+    showBanner("ciBanner", "");
+    if (!db) { toast("Not connected to shared storage.", true); return; }
+    if (!checkinForm.equipmentId) { showBanner("ciBanner", "Choose an item to check in first."); return; }
+    var name = byId("ciName").value.trim();
+    var team = byId("ciTeam").value.trim();
+    var location = byId("ciLocation").value.trim();
+    var time = byId("ciTime").value;
+    var authoriser = byId("ciAuthoriser").value;
+
+    if (!name) return showBanner("ciBanner", "Enter the borrower\u2019s name.");
+    if (!team) return showBanner("ciBanner", "Enter the team.");
+    if (!location) return showBanner("ciBanner", "Enter the location it was used at.");
+    if (!time) return showBanner("ciBanner", "Set the check-in time.");
+    if (!authoriser) return showBanner("ciBanner", "Choose who\u2019s checking it in (add authorisers in Settings if the list is empty).");
+
+    var btn = byId("ciSubmit");
+    btn.disabled = true;
+    try {
+      var eqRef = equipmentCol.doc(checkinForm.equipmentId);
+      var snap = await eqRef.get();
+      if (!snap.exists || snap.data().status !== "checked_out" || !snap.data().currentCheckoutId) {
+        showBanner("ciBanner", "This item has already been checked in.");
+        checkinForm.equipmentId = null;
+        renderCheckinPicker();
+        return;
+      }
+      var eqData = snap.data();
+      var checkoutId = eqData.currentCheckoutId;
+      var checkinRef = checkinsCol.doc();
+      var nowIso = new Date().toISOString();
+
+      await checkinRef.set({
+        equipmentId: checkinForm.equipmentId,
+        checkoutId: checkoutId,
+        equipmentSnapshot: { type: eqData.type, size: eqData.size || "", colour: eqData.colour || "", idTag: eqData.idTag },
+        name: name, team: team, location: location,
+        checkInTime: new Date(time).toISOString(),
+        checkedInBy: authoriser,
+        createdAt: nowIso
+      });
+      await checkoutsCol.doc(checkoutId).update({ status: "closed", checkinId: checkinRef.id });
+      await eqRef.update({ status: "in_store", currentCheckoutId: null });
+
+      toast("Checked in: " + eqData.type + " (" + eqData.idTag + ")");
+      renderCheckinTab(byId("main"));
+    } catch (e) {
+      console.error(e);
+      showBanner("ciBanner", "Something went wrong saving the check-in. Please try again.");
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  // =================================================================
+  // HISTORY (reconciled check-out / check-in pairs)
+  // =================================================================
+  function renderHistoryTab(main) {
+    main.innerHTML =
+      '<h2>History</h2>' +
+      '<p class="tab-desc">Every check-in is matched back to the check-out it closes, so you can see the full loan cycle for any item.</p>' +
+      '<div class="panel"><div class="table-wrap" id="historyTableWrap"></div></div>';
+    renderHistoryTable();
+  }
+
+  function renderHistoryTable() {
+    var wrap = byId("historyTableWrap");
+    if (!wrap) return;
+    if (!state.ready.checkouts || !state.ready.checkins) {
+      wrap.innerHTML = '<p class="tab-desc">Loading…</p>';
+      return;
+    }
+    var closed = state.checkouts.filter(function (c) { return c.status === "closed"; })
+      .sort(function (a, b) { return (b.checkOutTime || "").localeCompare(a.checkOutTime || ""); });
+
+    if (!closed.length) {
+      wrap.innerHTML = '<p class="tab-desc">No completed loans yet — closed check-outs will appear here once they\u2019re checked back in.</p>';
+      return;
+    }
+    wrap.innerHTML =
+      '<table><thead><tr><th>Item</th><th>Borrower</th><th>Out</th><th>In</th><th>Out by</th><th>In by</th></tr></thead><tbody>' +
+      closed.map(function (c) {
+        var ci = null;
+        for (var i = 0; i < state.checkins.length; i++) if (state.checkins[i].id === c.checkinId) { ci = state.checkins[i]; break; }
+        return '<tr>' +
+          '<td>' + esc(c.equipmentSnapshot ? c.equipmentSnapshot.type : "—") + '<br><span class="tag-chip">' + esc(c.equipmentSnapshot ? c.equipmentSnapshot.idTag : "—") + '</span></td>' +
+          '<td>' + esc(c.name) + '<br><span style="color:var(--text-soft);font-size:0.8rem;">' + esc(c.team) + '</span></td>' +
+          '<td>' + esc(fmtDateTime(c.checkOutTime)) + '</td>' +
+          '<td>' + (ci ? esc(fmtDateTime(ci.checkInTime)) : "—") + '</td>' +
+          '<td>' + esc(c.checkedOutBy) + '</td>' +
+          '<td>' + (ci ? esc(ci.checkedInBy) : "—") + '</td>' +
+          '</tr>';
+      }).join("") + '</tbody></table>';
+  }
+
+  // =================================================================
+  // EQUIPMENT (catalog management)
+  // =================================================================
+  function renderEquipmentTab(main) {
+    main.innerHTML =
+      '<h2>Equipment catalog</h2>' +
+      '<p class="tab-desc">Add, edit or retire the items admins can check out. Each item needs its own ID tag.</p>' +
+      '<div class="panel"><h3>Add an item</h3>' +
+        '<div class="field-row">' +
+          '<div class="field"><label for="eqType">Type</label><input type="text" id="eqType" placeholder="e.g. Training bibs (set of 12)"></div>' +
+          '<div class="field"><label for="eqQty">Quantity</label><input type="number" id="eqQty" min="1" value="1"></div>' +
+        '</div>' +
+        '<div class="field-row">' +
+          '<div class="field"><label for="eqSize">Size</label><input type="text" id="eqSize" placeholder="e.g. Size 5, M, N/A"></div>' +
+          '<div class="field"><label for="eqColour">Colour</label><input type="text" id="eqColour" placeholder="e.g. Claret"></div>' +
+          '<div class="field"><label for="eqTag">ID tag</label><input type="text" id="eqTag" placeholder="e.g. BIB-01"></div>' +
+        '</div>' +
+        '<div id="eqBanner"></div>' +
+        '<button class="btn" id="eqAdd" type="button">Add to catalog</button>' +
+      '</div>' +
+      '<div class="panel"><h3>All items</h3><div class="table-wrap" id="eqTableWrap"></div></div>';
+    byId("eqAdd").addEventListener("click", addEquipment);
+    renderEquipmentTable();
+  }
+
+  async function addEquipment() {
+    showBanner("eqBanner", "");
+    if (!db) { toast("Not connected to shared storage.", true); return; }
+    var type = byId("eqType").value.trim();
+    var qty = parseInt(byId("eqQty").value, 10);
+    var size = byId("eqSize").value.trim();
+    var colour = byId("eqColour").value.trim();
+    var idTag = byId("eqTag").value.trim();
+
+    if (!type) return showBanner("eqBanner", "Enter a type for this item.");
+    if (!idTag) return showBanner("eqBanner", "Enter an ID tag — this is what identifies the item at check-in.");
+    if (isNaN(qty) || qty < 1) qty = 1;
+    var dup = state.equipment.some(function (e) { return (e.idTag || "").toLowerCase() === idTag.toLowerCase(); });
+    if (dup) return showBanner("eqBanner", "That ID tag is already in use. Each item needs a unique tag.");
+
+    var btn = byId("eqAdd");
+    btn.disabled = true;
+    try {
+      var ref = equipmentCol.doc();
+      await ref.set({
+        type: type, quantity: qty, size: size, colour: colour, idTag: idTag,
+        status: "in_store", currentCheckoutId: null, createdAt: new Date().toISOString()
+      });
+      byId("eqType").value = ""; byId("eqQty").value = "1"; byId("eqSize").value = ""; byId("eqColour").value = ""; byId("eqTag").value = "";
+      toast("Added " + type + " to the catalog.");
+    } catch (e) {
+      console.error(e);
+      showBanner("eqBanner", "Couldn\u2019t save that item. Please try again.");
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  function renderEquipmentTable() {
+    var wrap = byId("eqTableWrap");
+    if (!wrap) return;
+    if (!state.ready.equipment) { wrap.innerHTML = '<p class="tab-desc">Loading…</p>'; return; }
+    if (!state.equipment.length) { wrap.innerHTML = '<p class="tab-desc">No equipment in the catalog yet — add your first item above.</p>'; return; }
+    var sorted = state.equipment.slice().sort(function (a, b) { return (a.type || "").localeCompare(b.type || ""); });
+    wrap.innerHTML =
+      '<table><thead><tr><th>Type</th><th>Size</th><th>Colour</th><th>Qty</th><th>ID tag</th><th>Status</th><th></th></tr></thead><tbody>' +
+      sorted.map(function (e) {
+        var statusChip = e.status === "in_store"
+          ? '<span class="status-chip in-store">In store</span>'
+          : '<span class="status-chip checked-out">Checked out</span>';
+        return '<tr>' +
+          '<td>' + esc(e.type) + '</td><td>' + esc(e.size || "—") + '</td><td>' + esc(e.colour || "—") + '</td><td>' + esc(e.quantity != null ? e.quantity : "—") + '</td>' +
+          '<td><span class="tag-chip">' + esc(e.idTag) + '</span></td><td>' + statusChip + '</td>' +
+          '<td>' + (e.status === "in_store" ? '<button class="icon-btn" data-del="' + esc(e.id) + '" type="button">Remove</button>' : '<span style="color:var(--text-soft);font-size:0.78rem;">Check in first</span>') + '</td>' +
+          '</tr>';
+      }).join("") + '</tbody></table>';
+    Array.prototype.forEach.call(wrap.querySelectorAll("[data-del]"), function (b) {
+      b.addEventListener("click", function () { removeEquipment(b.getAttribute("data-del"), b); });
+    });
+  }
+
+  async function removeEquipment(id, btnEl) {
+    if (!db) return;
+    var eq = equipmentById(id);
+    if (!eq) return;
+    if (!window.confirm("Remove \u201C" + eq.type + "\u201D (" + eq.idTag + ") from the catalog?")) return;
+    btnEl.disabled = true;
+    try {
+      var snap = await equipmentCol.doc(id).get();
+      if (snap.exists && snap.data().status !== "in_store") {
+        toast("That item is checked out — check it in before removing it.", true);
+        return;
+      }
+      await equipmentCol.doc(id).delete();
+      toast("Removed " + eq.type + " from the catalog.");
+    } catch (e) {
+      console.error(e);
+      toast("Couldn\u2019t remove that item.", true);
+    } finally {
+      btnEl.disabled = false;
+    }
+  }
+
+  // =================================================================
+  // SETTINGS (authorisers)
+  // =================================================================
+  function renderSettingsTab(main) {
+    main.innerHTML =
+      '<h2>Settings</h2>' +
+      '<p class="tab-desc">Manage the people who can appear in the \u201Cchecked out by\u201D / \u201Cchecked in by\u201D dropdowns.</p>' +
+      '<div class="panel"><h3>Authorisers</h3>' +
+        '<div class="field-row">' +
+          '<div class="field" style="flex:1;"><input type="text" id="authNew" placeholder="Add a name…"></div>' +
+          '<div><button class="btn" id="authAdd" type="button">Add</button></div>' +
+        '</div>' +
+        '<div id="authList"></div>' +
+      '</div>';
+    byId("authAdd").addEventListener("click", addAuthoriser);
+    byId("authNew").addEventListener("keydown", function (e) { if (e.key === "Enter") addAuthoriser(); });
+    renderAuthoriserList();
+  }
+
+  function renderAuthoriserList() {
+    var wrap = byId("authList");
+    if (!wrap) return;
+    if (!state.ready.settings) { wrap.innerHTML = '<p class="tab-desc">Loading…</p>'; return; }
+    if (!state.authorisers.length) { wrap.innerHTML = '<p class="tab-desc">No authorisers yet — add the names of admins who\u2019ll process check-outs and check-ins.</p>'; return; }
+    wrap.innerHTML = state.authorisers.map(function (a) {
+      return '<div class="authoriser-row"><span>' + esc(a) + '</span><button class="icon-btn" data-rm="' + esc(a) + '" type="button">Remove</button></div>';
+    }).join("");
+    Array.prototype.forEach.call(wrap.querySelectorAll("[data-rm]"), function (b) {
+      b.addEventListener("click", function () { removeAuthoriser(b.getAttribute("data-rm")); });
+    });
+  }
+
+  async function addAuthoriser() {
+    if (!db) { toast("Not connected to shared storage.", true); return; }
+    var input = byId("authNew");
+    var name = input.value.trim();
+    if (!name) return;
+    if (state.authorisers.some(function (a) { return a.toLowerCase() === name.toLowerCase(); })) {
+      toast("That name is already in the list.", true);
+      return;
+    }
+    var updated = state.authorisers.concat([name]);
+    try {
+      await settingsDoc.set({ authorisers: updated });
+      input.value = "";
+    } catch (e) {
+      console.error(e);
+      toast("Couldn\u2019t save that name.", true);
+    }
+  }
+
+  async function removeAuthoriser(name) {
+    if (!db) return;
+    var updated = state.authorisers.filter(function (a) { return a !== name; });
+    try {
+      await settingsDoc.set({ authorisers: updated });
+    } catch (e) {
+      console.error(e);
+      toast("Couldn\u2019t remove that name.", true);
+    }
+  }
+
+  // =================================================================
+  // Signature pad
+  // =================================================================
+  function setupSignaturePad(canvasId, clearBtnId, onChange) {
+    var canvas = byId(canvasId);
+    var ctx = canvas.getContext("2d");
+    var drawing = false;
+    var hasDrawn = false;
+    var last = null;
+
+    function resize() {
+      var rect = canvas.getBoundingClientRect();
+      var ratio = window.devicePixelRatio || 1;
+      canvas.width = rect.width * ratio;
+      canvas.height = rect.height * ratio;
+      ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, rect.width, rect.height);
+      ctx.strokeStyle = "#1B231F";
+      ctx.lineWidth = 2;
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+    }
+    resize();
+    window.addEventListener("resize", resize);
+
+    function pos(evt) {
+      var rect = canvas.getBoundingClientRect();
+      var cx = (evt.touches ? evt.touches[0].clientX : evt.clientX) - rect.left;
+      var cy = (evt.touches ? evt.touches[0].clientY : evt.clientY) - rect.top;
+      return { x: cx, y: cy };
+    }
+    function start(evt) {
+      evt.preventDefault();
+      drawing = true;
+      last = pos(evt);
+    }
+    function move(evt) {
+      if (!drawing) return;
+      evt.preventDefault();
+      var p = pos(evt);
+      ctx.beginPath();
+      ctx.moveTo(last.x, last.y);
+      ctx.lineTo(p.x, p.y);
+      ctx.stroke();
+      last = p;
+      if (!hasDrawn) { hasDrawn = true; onChange(true); }
+    }
+    function end() { drawing = false; }
+
+    canvas.addEventListener("mousedown", start);
+    canvas.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", end);
+    canvas.addEventListener("touchstart", start, { passive: false });
+    canvas.addEventListener("touchmove", move, { passive: false });
+    canvas.addEventListener("touchend", end);
+
+    byId(clearBtnId).addEventListener("click", function () {
+      resize();
+      hasDrawn = false;
+      onChange(false);
+    });
+  }
+
+  // ---------------------------------------------------------------
+  // Boot
+  // ---------------------------------------------------------------
+  renderNav();
+  renderMain();
+  renderStatStrip();
+  initDb();
+})();
+</script>
+</body>
+</html>
