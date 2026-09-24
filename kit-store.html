@@ -266,6 +266,17 @@
     color: var(--text);
   }
   .field .hint, p.hint { font-size: 0.75rem; color: var(--text-soft); margin: 4px 0 10px; }
+  .quick-picks { display: flex; gap: 6px; margin-top: 6px; }
+  .quick-pick-btn {
+    background: var(--chalk-200);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-size: 0.76rem;
+    font-weight: 600;
+  }
+  .quick-pick-btn:hover { background: var(--tag-green-bg); border-color: var(--pitch-600); }
   .field-row { display: flex; gap: 12px; }
   .field-row .field { flex: 1; }
 
@@ -451,6 +462,26 @@
   }
   .authoriser-row:last-child { border-bottom: none; }
 
+  .chain-timeline { display: flex; flex-direction: column; }
+  .chain-hop { display: flex; gap: 12px; align-items: flex-start; }
+  .chain-hop-num {
+    flex-shrink: 0;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: var(--pitch-600);
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.75rem;
+    font-weight: 700;
+    font-family: 'Oswald', sans-serif;
+  }
+  .chain-hop-body { padding-bottom: 2px; font-size: 0.9rem; }
+  .chain-hop-meta { font-size: 0.78rem; color: var(--text-soft); margin-top: 2px; }
+  .chain-connector { width: 24px; height: 14px; border-left: 2px solid var(--border); margin-left: 11px; }
+
   .icon-btn {
     background: transparent;
     border: none;
@@ -482,6 +513,9 @@
 </div>
 
 <div id="toast"></div>
+<datalist id="nameList"></datalist>
+<datalist id="teamList"></datalist>
+<datalist id="locationList"></datalist>
 <div class="lock-screen" id="lockScreen">
   <div class="lock-box" id="lockBox">
     <h2>PCFC Kit Store</h2>
@@ -514,6 +548,7 @@
     checkouts: [],       // {id, ...}
     checkins: [],
     authorisers: [],
+    suggestions: { names: [], teams: [], locations: [] },
     ready: { equipment: false, checkouts: false, checkins: false, settings: false }
   };
 
@@ -549,6 +584,12 @@
   }
   function plusDaysISODate(n) {
     var d = new Date();
+    d.setDate(d.getDate() + n);
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+  }
+  function addDaysToISODate(dateStr, n) {
+    var d = new Date(dateStr + "T00:00:00");
+    if (isNaN(d.getTime())) d = new Date();
     d.setDate(d.getDate() + n);
     return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
   }
@@ -648,6 +689,11 @@
     settingsDoc.onSnapshot(function (snap) {
       var data = snap.exists ? snap.data() : {};
       state.authorisers = (data && data.authorisers) || [];
+      state.suggestions = {
+        names: (data && data.suggestNames) || [],
+        teams: (data && data.suggestTeams) || [],
+        locations: (data && data.suggestLocations) || []
+      };
       state.ready.settings = true;
       onSettingsChange();
     }, dbErr);
@@ -689,9 +735,10 @@
     if (state.activeTab === "history") renderHistoryTable();
   }
   function onSettingsChange() {
+    renderSuggestionDatalists();
     if (state.activeTab === "checkout") refreshAuthoriserSelect("coAuthoriser");
     if (state.activeTab === "checkin") refreshAuthoriserSelect("ciAuthoriser");
-    if (state.activeTab === "settings") renderAuthoriserList();
+    if (state.activeTab === "settings") { renderAuthoriserList(); renderSuggestionLists(); }
   }
 
   // ---------------------------------------------------------------
@@ -840,14 +887,16 @@
           '<div class="picker" id="coEquipmentList"></div>' +
         '</div>' +
         '<div class="panel"><h3>2. Borrower details</h3>' +
-          '<div class="field"><label for="coName">Name</label><input type="text" id="coName" placeholder="Who\u2019s taking it"></div>' +
+          '<div class="field"><label for="coName">Name</label><input type="text" id="coName" list="nameList" autocomplete="off" placeholder="Who\u2019s taking it"></div>' +
           '<div class="field-row">' +
-            '<div class="field"><label for="coTeam">Team</label><input type="text" id="coTeam" placeholder="e.g. Ladies Firsts"></div>' +
-            '<div class="field"><label for="coLocation">Location used at</label><input type="text" id="coLocation" placeholder="e.g. Purston playing fields"></div>' +
+            '<div class="field"><label for="coTeam">Team</label><input type="text" id="coTeam" list="teamList" autocomplete="off" placeholder="e.g. Ladies Firsts"></div>' +
+            '<div class="field"><label for="coLocation">Location used at</label><input type="text" id="coLocation" list="locationList" autocomplete="off" placeholder="e.g. Purston playing fields"></div>' +
           '</div>' +
           '<div class="field-row">' +
             '<div class="field"><label for="coTime">Check-out time</label><input type="datetime-local" id="coTime"></div>' +
-            '<div class="field"><label for="coDue">Check-in due date</label><input type="date" id="coDue"></div>' +
+            '<div class="field"><label for="coDue">Check-in due date</label><input type="date" id="coDue">' +
+              '<div class="quick-picks" id="coDueQuick"></div>' +
+            '</div>' +
           '</div>' +
           '<div class="field"><label for="coAuthoriser">Checked out by</label><select id="coAuthoriser"></select></div>' +
           '<div id="coBanner"></div>' +
@@ -868,9 +917,32 @@
     refreshAuthoriserSelect("coAuthoriser");
     renderCheckoutPicker();
     setupSignaturePad("sigCanvas", "sigClear", function (drawn) { checkoutForm.hasSig = drawn; });
+    renderDueDateQuickPicks();
+    byId("coTime").addEventListener("change", renderDueDateQuickPicks);
 
     byId("coSearch").addEventListener("input", renderCheckoutPicker);
     byId("coSubmit").addEventListener("click", submitCheckout);
+  }
+
+  // Quick day-offset buttons for the due date, anchored to the check-out date,
+  // so picking a near-term due date rarely needs the native calendar at all.
+  function renderDueDateQuickPicks() {
+    var quickWrap = byId("coDueQuick");
+    var dueInput = byId("coDue");
+    var timeInput = byId("coTime");
+    if (!quickWrap || !dueInput || !timeInput) return;
+    var baseDateStr = (timeInput.value || nowLocalDatetimeValue()).slice(0, 10);
+    dueInput.min = baseDateStr;
+    var offsets = [3, 7, 14];
+    quickWrap.innerHTML = offsets.map(function (n) {
+      var target = addDaysToISODate(baseDateStr, n);
+      return '<button type="button" class="quick-pick-btn" data-days="' + n + '">+' + n + 'd</button>';
+    }).join("");
+    Array.prototype.forEach.call(quickWrap.querySelectorAll(".quick-pick-btn"), function (b) {
+      b.addEventListener("click", function () {
+        dueInput.value = addDaysToISODate(baseDateStr, parseInt(b.getAttribute("data-days"), 10));
+      });
+    });
   }
 
   function renderCheckoutPicker() {
@@ -928,7 +1000,7 @@
         html += handover.map(function (e) {
           var co = checkoutById(e.currentCheckoutId);
           var hopsLeft = MAX_CASCADE_DEPTH - ((co && co.cascadeDepth) || 0);
-          return rowHtml(e, "currently with " + (co ? co.name : "?") + " · " + hopsLeft + " hand-over" + (hopsLeft === 1 ? "" : "s") + " left after this");
+          return rowHtml(e, "currently with " + (co ? co.name + " (" + co.team + ")" : "?") + " · " + hopsLeft + " hand-over" + (hopsLeft === 1 ? "" : "s") + " left after this");
         }).join("");
       }
       if (atCap) {
@@ -959,6 +1031,37 @@
     sel.disabled = false;
     sel.innerHTML = state.authorisers.map(function (a) { return '<option value="' + esc(a) + '">' + esc(a) + '</option>'; }).join("");
     if (prev && state.authorisers.indexOf(prev) > -1) sel.value = prev;
+  }
+
+  function renderSuggestionDatalists() {
+    var map = { nameList: state.suggestions.names, teamList: state.suggestions.teams, locationList: state.suggestions.locations };
+    Object.keys(map).forEach(function (id) {
+      var el = byId(id);
+      if (!el) return;
+      el.innerHTML = map[id].map(function (v) { return '<option value="' + esc(v) + '">'; }).join("");
+    });
+  }
+
+  var MAX_SUGGESTIONS = 40;
+  function withSuggestion(list, value) {
+    value = (value || "").trim();
+    if (!value) return list;
+    var lower = value.toLowerCase();
+    var without = list.filter(function (v) { return v.toLowerCase() !== lower; });
+    return [value].concat(without).slice(0, MAX_SUGGESTIONS);
+  }
+
+  async function saveBorrowerSuggestions(name, team, location) {
+    if (!db) return;
+    try {
+      await settingsDoc.set({
+        suggestNames: withSuggestion(state.suggestions.names, name),
+        suggestTeams: withSuggestion(state.suggestions.teams, team),
+        suggestLocations: withSuggestion(state.suggestions.locations, location)
+      }, { merge: true });
+    } catch (e) {
+      console.error("Couldn\u2019t save suggestions", e);
+    }
   }
 
   function showBanner(elId, msg, kind) {
@@ -1067,6 +1170,7 @@
       if (skipped.length) msg += " " + skipped.length + " item(s) were no longer available.";
       if (cappedSkipped.length) msg += " " + cappedSkipped.length + " item(s) hit the " + MAX_CASCADE_DEPTH + "-hand-over limit — check them in to store first.";
       toast(msg, !!hadIssues);
+      saveBorrowerSuggestions(name, team, location);
       renderCheckoutTab(byId("main"));
     } catch (e) {
       console.error(e);
@@ -1129,7 +1233,7 @@
       var mates = bundleMates(e.id).length;
       return '<div class="picker-item' + (sel ? ' selected' : '') + '" data-id="' + esc(e.id) + '">' +
         '<input type="checkbox" style="width:auto;flex-shrink:0;" ' + (sel ? "checked" : "") + ' data-id="' + esc(e.id) + '">' +
-        '<div class="info"><div class="t">' + esc(e.type) + '</div><div class="m">' + (co ? "with " + esc(co.name) : "") + (mates ? " · +" + mates + " more in this bundle" : "") + '</div></div>' +
+        '<div class="info"><div class="t">' + esc(e.type) + '</div><div class="m">' + (co ? "with " + esc(co.name) + " (" + esc(co.team) + ") at " + esc(co.location) : "") + (mates ? " · +" + mates + " more in this bundle" : "") + '</div></div>' +
         '<span class="tag-chip">' + esc(e.idTag) + '</span>' +
         '</div>';
     }).join("");
@@ -1171,10 +1275,10 @@
     wrap.innerHTML =
       summaryRows +
       '<div class="field-row">' +
-        '<div class="field"><label for="ciName">Name</label><input type="text" id="ciName" value="' + esc(first.name) + '"></div>' +
-        '<div class="field"><label for="ciTeam">Team</label><input type="text" id="ciTeam" value="' + esc(first.team) + '"></div>' +
+        '<div class="field"><label for="ciName">Name</label><input type="text" id="ciName" list="nameList" autocomplete="off" value="' + esc(first.name) + '"></div>' +
+        '<div class="field"><label for="ciTeam">Team</label><input type="text" id="ciTeam" list="teamList" autocomplete="off" value="' + esc(first.team) + '"></div>' +
       '</div>' +
-      '<div class="field"><label for="ciLocation">Location used at</label><input type="text" id="ciLocation" value="' + esc(first.location) + '"></div>' +
+      '<div class="field"><label for="ciLocation">Location used at</label><input type="text" id="ciLocation" list="locationList" autocomplete="off" value="' + esc(first.location) + '"></div>' +
       '<div class="field-row">' +
         '<div class="field"><label for="ciTime">Check-in time</label><input type="datetime-local" id="ciTime"></div>' +
         '<div class="field"><label for="ciAuthoriser">Checked in by</label><select id="ciAuthoriser"></select></div>' +
@@ -1261,48 +1365,88 @@
   function renderHistoryTab(main) {
     main.innerHTML =
       '<h2>History</h2>' +
-      '<p class="tab-desc">Every check-in is matched back to the check-out it closes, so you can see the full loan cycle for any item.</p>' +
-      '<div class="panel"><div class="table-wrap" id="historyTableWrap"></div></div>';
+      '<p class="tab-desc">Each loan is traced from the original check-out through any hand-overs to its return — so you can follow an item\u2019s whole journey in one place, in order.</p>' +
+      '<div id="historyChains"></div>';
     renderHistoryTable();
   }
 
+  function checkinById(id) {
+    for (var i = 0; i < state.checkins.length; i++) if (state.checkins[i].id === id) return state.checkins[i];
+    return null;
+  }
+
+  // Walk a chain forward from its originating (cascadeDepth 0) check-out, following
+  // hand-overs via checkin.cascadedToCheckoutId, until it's returned to store or is still out.
+  function buildLoanChain(startCheckout) {
+    var hops = [];
+    var current = startCheckout;
+    var guard = 0;
+    while (current && guard < 20) {
+      guard++;
+      var ci = current.checkinId ? checkinById(current.checkinId) : null;
+      hops.push({ checkout: current, checkin: ci });
+      if (ci && ci.cascaded && ci.cascadedToCheckoutId) {
+        current = checkoutById(ci.cascadedToCheckoutId);
+      } else {
+        current = null;
+      }
+    }
+    return hops;
+  }
+
   function renderHistoryTable() {
-    var wrap = byId("historyTableWrap");
+    var wrap = byId("historyChains");
     if (!wrap) return;
     if (!state.ready.checkouts || !state.ready.checkins) {
       wrap.innerHTML = '<p class="tab-desc">Loading…</p>';
       return;
     }
-    var closed = state.checkouts.filter(function (c) { return c.status === "closed"; })
+    var starts = state.checkouts.filter(function (c) { return !c.precedingCheckoutId; })
       .sort(function (a, b) { return (b.checkOutTime || "").localeCompare(a.checkOutTime || ""); });
 
-    if (!closed.length) {
-      wrap.innerHTML = '<p class="tab-desc">No completed loans yet — closed check-outs will appear here once they\u2019re checked back in.</p>';
+    if (!starts.length) {
+      wrap.innerHTML = '<p class="tab-desc">No loans yet — check something out and its history will appear here.</p>';
       return;
     }
-    wrap.innerHTML =
-      '<table><thead><tr><th>Item</th><th>Borrower</th><th>Out</th><th>In</th><th>Out by</th><th>In by</th><th>Result</th></tr></thead><tbody>' +
-      closed.map(function (c) {
-        var ci = null;
-        for (var i = 0; i < state.checkins.length; i++) if (state.checkins[i].id === c.checkinId) { ci = state.checkins[i]; break; }
-        var result = "—";
-        if (ci && ci.cascaded && ci.cascadedToCheckoutId) {
-          var nextCo = checkoutById(ci.cascadedToCheckoutId);
-          result = nextCo ? "Passed to " + esc(nextCo.name) + " (" + esc(nextCo.team) + ")" : "Passed on";
-        } else if (ci) {
-          result = "Returned to store";
+
+    wrap.innerHTML = starts.map(function (start) {
+      var hops = buildLoanChain(start);
+      var lastHop = hops[hops.length - 1];
+      var stillOut = !lastHop.checkin;
+      var eqType = start.equipmentSnapshot ? start.equipmentSnapshot.type : "—";
+      var eqTag = start.equipmentSnapshot ? start.equipmentSnapshot.idTag : "—";
+      var statusChip = stillOut
+        ? '<span class="status-chip checked-out">Currently out</span>'
+        : '<span class="status-chip in-store">Returned to store</span>';
+
+      var hopRows = hops.map(function (hop, i) {
+        var co = hop.checkout, ci = hop.checkin;
+        var overdue = !ci && isOverdue(co.dueDate);
+        var line1 = '<strong>' + esc(co.name) + '</strong> (' + esc(co.team) + ') at ' + esc(co.location);
+        var line2 = 'Out ' + esc(fmtDateTime(co.checkOutTime)) + ' by ' + esc(co.checkedOutBy) + ' — due ' + esc(fmtDate(co.dueDate));
+        var line3;
+        if (!ci) {
+          line3 = overdue ? '<span style="color:var(--tag-red);font-weight:600;">Still out — overdue</span>' : '<span style="color:var(--text-soft);">Still out</span>';
+        } else if (ci.cascaded) {
+          line3 = 'Handed over ' + esc(fmtDateTime(ci.checkInTime)) + ' by ' + esc(ci.checkedInBy);
+        } else {
+          line3 = 'Returned to store ' + esc(fmtDateTime(ci.checkInTime)) + ', checked in by ' + esc(ci.checkedInBy);
         }
-        var depthBadge = c.cascadeDepth ? '<span class="tag-chip" style="margin-left:6px;">hop ' + c.cascadeDepth + '</span>' : "";
-        return '<tr>' +
-          '<td>' + esc(c.equipmentSnapshot ? c.equipmentSnapshot.type : "—") + depthBadge + '<br><span class="tag-chip">' + esc(c.equipmentSnapshot ? c.equipmentSnapshot.idTag : "—") + '</span></td>' +
-          '<td>' + esc(c.name) + '<br><span style="color:var(--text-soft);font-size:0.8rem;">' + esc(c.team) + '</span></td>' +
-          '<td>' + esc(fmtDateTime(c.checkOutTime)) + '</td>' +
-          '<td>' + (ci ? esc(fmtDateTime(ci.checkInTime)) : "—") + '</td>' +
-          '<td>' + esc(c.checkedOutBy) + '</td>' +
-          '<td>' + (ci ? esc(ci.checkedInBy) : "—") + '</td>' +
-          '<td>' + result + '</td>' +
-          '</tr>';
-      }).join("") + '</tbody></table>';
+        return '<div class="chain-hop">' +
+          '<div class="chain-hop-num">' + (i + 1) + '</div>' +
+          '<div class="chain-hop-body">' +
+            '<div>' + line1 + '</div>' +
+            '<div class="chain-hop-meta">' + line2 + '</div>' +
+            '<div class="chain-hop-meta">' + line3 + '</div>' +
+          '</div>' +
+        '</div>';
+      }).join('<div class="chain-connector"></div>');
+
+      return '<div class="panel">' +
+        '<h3><span>' + esc(eqType) + ' <span class="tag-chip">' + esc(eqTag) + '</span></span> ' + statusChip + '</h3>' +
+        '<div class="chain-timeline">' + hopRows + '</div>' +
+      '</div>';
+    }).join("");
   }
 
   // =================================================================
@@ -1378,12 +1522,32 @@
         return '<tr>' +
           '<td>' + esc(e.type) + '</td><td>' + esc(e.size || "—") + '</td><td>' + esc(e.colour || "—") + '</td><td>' + esc(e.quantity != null ? e.quantity : "—") + '</td>' +
           '<td><span class="tag-chip">' + esc(e.idTag) + '</span></td><td>' + statusChip + '</td>' +
-          '<td>' + (e.status === "in_store" ? '<button class="icon-btn" data-del="' + esc(e.id) + '" type="button">Remove</button>' : '<span style="color:var(--text-soft);font-size:0.78rem;">Check in first</span>') + '</td>' +
+          '<td style="white-space:nowrap;">' +
+            '<button class="icon-btn" data-dup="' + esc(e.id) + '" type="button" style="color:var(--text-soft);">Duplicate</button>' +
+            (e.status === "in_store" ? '<button class="icon-btn" data-del="' + esc(e.id) + '" type="button">Remove</button>' : '') +
+          '</td>' +
           '</tr>';
       }).join("") + '</tbody></table>';
     Array.prototype.forEach.call(wrap.querySelectorAll("[data-del]"), function (b) {
       b.addEventListener("click", function () { removeEquipment(b.getAttribute("data-del"), b); });
     });
+    Array.prototype.forEach.call(wrap.querySelectorAll("[data-dup]"), function (b) {
+      b.addEventListener("click", function () { duplicateEquipment(b.getAttribute("data-dup")); });
+    });
+  }
+
+  function duplicateEquipment(id) {
+    var eq = equipmentById(id);
+    if (!eq) return;
+    byId("eqType").value = eq.type || "";
+    byId("eqQty").value = eq.quantity != null ? eq.quantity : 1;
+    byId("eqSize").value = eq.size || "";
+    byId("eqColour").value = eq.colour || "";
+    byId("eqTag").value = "";
+    showBanner("eqBanner", "");
+    byId("eqTag").focus();
+    byId("eqType").scrollIntoView({ behavior: "smooth", block: "center" });
+    toast("Copied \u201C" + eq.type + "\u201D \u2014 give it a new ID tag and save.");
   }
 
   async function removeEquipment(id, btnEl) {
@@ -1409,22 +1573,84 @@
   }
 
   // =================================================================
-  // SETTINGS (authorisers)
+  // SETTINGS (authorisers, remembered suggestions)
   // =================================================================
   function renderSettingsTab(main) {
     main.innerHTML =
       '<h2>Settings</h2>' +
-      '<p class="tab-desc">Manage the people who can appear in the \u201Cchecked out by\u201D / \u201Cchecked in by\u201D dropdowns.</p>' +
+      '<p class="tab-desc">Manage the people who can appear in the \u201Cchecked out by\u201D / \u201Cchecked in by\u201D dropdowns, and the predictive suggestions offered when filling in borrower details.</p>' +
       '<div class="panel"><h3>Authorisers</h3>' +
         '<div class="field-row">' +
           '<div class="field" style="flex:1;"><input type="text" id="authNew" placeholder="Add a name…"></div>' +
           '<div><button class="btn" id="authAdd" type="button">Add</button></div>' +
         '</div>' +
         '<div id="authList"></div>' +
-      '</div>';
+      '</div>' +
+      suggestionSectionHtml("names", "Remembered names") +
+      suggestionSectionHtml("teams", "Remembered teams") +
+      suggestionSectionHtml("locations", "Remembered locations");
     byId("authAdd").addEventListener("click", addAuthoriser);
     byId("authNew").addEventListener("keydown", function (e) { if (e.key === "Enter") addAuthoriser(); });
     renderAuthoriserList();
+    renderSuggestionLists();
+    ["names", "teams", "locations"].forEach(function (field) {
+      var clearBtn = byId("clear_" + field);
+      if (clearBtn) clearBtn.addEventListener("click", function () { clearSuggestions(field); });
+    });
+  }
+
+  function suggestionSectionHtml(field, title) {
+    return '<div class="panel"><h3>' + esc(title) + ' <button class="icon-btn small" id="clear_' + field + '" type="button" style="font-weight:400;">Clear all</button></h3>' +
+      '<p class="tab-desc" style="margin-bottom:10px;">Picked up automatically from check-outs, and offered as suggestions while typing. Remove individual typos below.</p>' +
+      '<div id="sugg_' + field + '"></div>' +
+    '</div>';
+  }
+
+  function renderSuggestionLists() {
+    ["names", "teams", "locations"].forEach(function (field) {
+      var wrap = byId("sugg_" + field);
+      if (!wrap) return;
+      var list = state.suggestions[field] || [];
+      if (!state.ready.settings) { wrap.innerHTML = '<p class="tab-desc">Loading…</p>'; return; }
+      if (!list.length) { wrap.innerHTML = '<p class="tab-desc">None remembered yet.</p>'; return; }
+      wrap.innerHTML = list.map(function (v) {
+        return '<div class="authoriser-row"><span>' + esc(v) + '</span><button class="icon-btn" data-sugg-rm="' + esc(field) + '|' + esc(v) + '" type="button">Remove</button></div>';
+      }).join("");
+      Array.prototype.forEach.call(wrap.querySelectorAll("[data-sugg-rm]"), function (b) {
+        b.addEventListener("click", function () {
+          var parts = b.getAttribute("data-sugg-rm").split("|");
+          removeSuggestion(parts[0], parts.slice(1).join("|"));
+        });
+      });
+    });
+  }
+
+  var SUGGESTION_DB_FIELD = { names: "suggestNames", teams: "suggestTeams", locations: "suggestLocations" };
+
+  async function removeSuggestion(field, value) {
+    if (!db) return;
+    var updated = (state.suggestions[field] || []).filter(function (v) { return v !== value; });
+    try {
+      var payload = {};
+      payload[SUGGESTION_DB_FIELD[field]] = updated;
+      await settingsDoc.set(payload, { merge: true });
+    } catch (e) {
+      console.error(e);
+      toast("Couldn\u2019t remove that entry.", true);
+    }
+  }
+
+  async function clearSuggestions(field) {
+    if (!db) return;
+    if (!window.confirm("Clear all remembered " + field + "?")) return;
+    try {
+      var payload = {};
+      payload[SUGGESTION_DB_FIELD[field]] = [];
+      await settingsDoc.set(payload, { merge: true });
+    } catch (e) {
+      console.error(e);
+      toast("Couldn\u2019t clear that list.", true);
+    }
   }
 
   function renderAuthoriserList() {
@@ -1451,7 +1677,7 @@
     }
     var updated = state.authorisers.concat([name]);
     try {
-      await settingsDoc.set({ authorisers: updated });
+      await settingsDoc.set({ authorisers: updated }, { merge: true });
       input.value = "";
     } catch (e) {
       console.error(e);
@@ -1463,7 +1689,7 @@
     if (!db) return;
     var updated = state.authorisers.filter(function (a) { return a !== name; });
     try {
-      await settingsDoc.set({ authorisers: updated });
+      await settingsDoc.set({ authorisers: updated }, { merge: true });
     } catch (e) {
       console.error(e);
       toast("Couldn\u2019t remove that name.", true);
