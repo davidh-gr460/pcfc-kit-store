@@ -400,6 +400,37 @@
   .conn-block h2 { margin-bottom: 8px; }
   .conn-block p { color: var(--text-soft); font-size: 0.9rem; }
 
+  .lock-screen {
+    position: fixed;
+    inset: 0;
+    background: var(--sidebar-bg);
+    color: var(--sidebar-text);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 200;
+    padding: 20px;
+  }
+  .lock-box { max-width: 300px; width: 100%; text-align: center; }
+  .lock-box h2 { margin: 0 0 4px; font-size: 1.2rem; }
+  .lock-box p { color: var(--sidebar-text-dim); font-size: 0.85rem; margin: 0 0 18px; }
+  .lock-box input {
+    width: 100%;
+    text-align: center;
+    letter-spacing: 0.3em;
+    font-size: 1.3rem;
+    padding: 12px 10px;
+    border-radius: var(--radius);
+    border: 1px solid rgba(255,255,255,0.2);
+    background: rgba(255,255,255,0.06);
+    color: #fff;
+    margin-bottom: 12px;
+  }
+  .lock-box .err { color: #E08A78; font-size: 0.82rem; min-height: 18px; margin-bottom: 8px; }
+  .lock-box .btn { width: 100%; justify-content: center; }
+  @keyframes shake { 10%,90%{transform:translateX(-1px);} 20%,80%{transform:translateX(2px);} 30%,50%,70%{transform:translateX(-4px);} 40%,60%{transform:translateX(4px);} }
+  .lock-box.shake { animation: shake 0.4s; }
+
   .authoriser-row, .team-tag-row {
     display: flex;
     align-items: center;
@@ -441,6 +472,15 @@
 </div>
 
 <div id="toast"></div>
+<div class="lock-screen" id="lockScreen">
+  <div class="lock-box" id="lockBox">
+    <h2>PCFC Kit Store</h2>
+    <p>Enter the access code to continue</p>
+    <input type="password" inputmode="numeric" id="lockInput" maxlength="12" autocomplete="off">
+    <div class="err" id="lockErr"></div>
+    <button class="btn" id="lockSubmit" type="button">Unlock</button>
+  </div>
+</div>
 
 <script>
 (function () {
@@ -1346,12 +1386,53 @@
   }
 
   // ---------------------------------------------------------------
+  // Lock screen
+  // ---------------------------------------------------------------
+  var ACCESS_CODE = "160363";
+  var UNLOCK_KEY = "pcfcKitStoreUnlocked";
+
+  function boot() {
+    renderNav();
+    renderMain();
+    renderStatStrip();
+    initDb();
+  }
+
+  function tryUnlock() {
+    var input = byId("lockInput");
+    var val = input.value.trim();
+    if (val === ACCESS_CODE) {
+      try { localStorage.setItem(UNLOCK_KEY, "1"); } catch (e) {}
+      byId("lockScreen").remove();
+      boot();
+    } else {
+      byId("lockErr").textContent = "Incorrect code — try again.";
+      var box = byId("lockBox");
+      box.classList.remove("shake");
+      void box.offsetWidth;
+      box.classList.add("shake");
+      input.value = "";
+      input.focus();
+    }
+  }
+
+  function initLockScreen() {
+    var alreadyUnlocked = false;
+    try { alreadyUnlocked = localStorage.getItem(UNLOCK_KEY) === "1"; } catch (e) {}
+    if (alreadyUnlocked) {
+      byId("lockScreen").remove();
+      boot();
+      return;
+    }
+    byId("lockSubmit").addEventListener("click", tryUnlock);
+    byId("lockInput").addEventListener("keydown", function (e) { if (e.key === "Enter") tryUnlock(); });
+    byId("lockInput").focus();
+  }
+
+  // ---------------------------------------------------------------
   // Boot
   // ---------------------------------------------------------------
-  renderNav();
-  renderMain();
-  renderStatStrip();
-  initDb();
+  initLockScreen();
 })();
 </script>
 </body>
