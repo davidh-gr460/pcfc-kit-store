@@ -343,6 +343,16 @@
   .picker-item .info .t { font-weight: 600; font-size: 0.9rem; }
   .picker-item .info .m { font-size: 0.78rem; color: var(--text-soft); }
   .picker-empty { padding: 20px 12px; color: var(--text-soft); font-style: italic; font-size: 0.88rem; }
+  .picker-section-label {
+    padding: 7px 12px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-soft);
+    background: var(--chalk-200);
+    border-bottom: 1px solid var(--border);
+  }
 
   /* ---- Signature ---- */
   .sig-wrap { border: 1px solid var(--border); border-radius: var(--radius); background: #fff; touch-action: none; }
@@ -512,7 +522,7 @@
 
   // Transient per-tab local form state (kept out of full re-renders)
   var checkoutForm = { equipmentIds: [], hasSig: false };
-  var checkinForm = { equipmentIds: [], passOn: false, hasSig: false };
+  var checkinForm = { equipmentIds: [] };
   var MAX_CASCADE_DEPTH = 3;
 
   function uid() {
@@ -823,7 +833,7 @@
     checkoutForm.hasSig = false;
     main.innerHTML =
       '<h2>Check equipment out</h2>' +
-      '<p class="tab-desc">Pick one or more items that are in store, record who\u2019s taking them, and capture one signature to cover the whole lot.</p>' +
+      '<p class="tab-desc">Pick items that are in store, or items already out with another team that are being handed straight over. Record who\u2019s taking them and capture one signature to cover the whole lot — that signature is what puts responsibility on them.</p>' +
       '<div class="grid-2">' +
         '<div class="panel"><h3>1. Choose items <span id="coSelCount" style="font-weight:400;font-size:0.78rem;color:var(--text-soft);"></span></h3>' +
           '<div class="field"><input type="text" id="coSearch" placeholder="Search by type or ID tag…"></div>' +
@@ -867,15 +877,26 @@
     var list = byId("coEquipmentList");
     if (!list) return;
     var q = (byId("coSearch") && byId("coSearch").value || "").toLowerCase().trim();
-    var items = state.equipment.filter(function (e) { return e.status === "in_store"; });
-    if (q) {
-      items = items.filter(function (e) {
-        return (e.type || "").toLowerCase().indexOf(q) > -1 || (e.idTag || "").toLowerCase().indexOf(q) > -1;
-      });
-    }
-    var validIds = {};
-    state.equipment.forEach(function (e) { if (e.status === "in_store") validIds[e.id] = true; });
-    checkoutForm.equipmentIds = checkoutForm.equipmentIds.filter(function (id) { return validIds[id]; });
+    var matches = function (e) {
+      if (!q) return true;
+      return (e.type || "").toLowerCase().indexOf(q) > -1 || (e.idTag || "").toLowerCase().indexOf(q) > -1;
+    };
+    var inStore = state.equipment.filter(function (e) { return e.status === "in_store" && matches(e); });
+    var handoverAll = state.equipment.filter(function (e) { return e.status === "checked_out" && matches(e); });
+    var handover = handoverAll.filter(function (e) {
+      var co = checkoutById(e.currentCheckoutId);
+      return co && (co.cascadeDepth || 0) < MAX_CASCADE_DEPTH;
+    });
+    var atCap = handoverAll.length - handover.length;
+
+    // don't drop a selection just because of the current search filter — only if it's no longer eligible at all
+    var eligibleIds = {};
+    state.equipment.forEach(function (e) {
+      if (e.status === "in_store") { eligibleIds[e.id] = true; return; }
+      var co = checkoutById(e.currentCheckoutId);
+      if (e.status === "checked_out" && co && (co.cascadeDepth || 0) < MAX_CASCADE_DEPTH) eligibleIds[e.id] = true;
+    });
+    checkoutForm.equipmentIds = checkoutForm.equipmentIds.filter(function (id) { return eligibleIds[id]; });
 
     var countEl = byId("coSelCount");
     if (countEl) countEl.textContent = checkoutForm.equipmentIds.length ? "(" + checkoutForm.equipmentIds.length + " selected)" : "";
@@ -884,20 +905,39 @@
       list.innerHTML = '<div class="picker-empty">Loading…</div>';
       return;
     }
-    if (!items.length) {
-      list.innerHTML = '<div class="picker-empty">' + (q ? "No matching items in store." : "Nothing in store to check out.") + '</div>';
-      return;
-    }
-    list.innerHTML = items.map(function (e) {
+
+    function rowHtml(e, subLabel) {
       var sel = checkoutForm.equipmentIds.indexOf(e.id) > -1;
       return '<div class="picker-item' + (sel ? ' selected' : '') + '" data-id="' + esc(e.id) + '">' +
         '<input type="checkbox" style="width:auto;flex-shrink:0;" ' + (sel ? "checked" : "") + ' data-id="' + esc(e.id) + '">' +
-        '<div class="info"><div class="t">' + esc(e.type) + '</div><div class="m">' + [e.size, e.colour].filter(Boolean).map(esc).join(" · ") + '</div></div>' +
+        '<div class="info"><div class="t">' + esc(e.type) + '</div><div class="m">' + esc(subLabel) + '</div></div>' +
         '<span class="tag-chip">' + esc(e.idTag) + '</span>' +
         '</div>';
-    }).join("");
+    }
+
+    var html = "";
+    if (!inStore.length && !handover.length) {
+      html = '<div class="picker-empty">' + (q ? "No matching items." : "Nothing available to check out.") + '</div>';
+    } else {
+      if (inStore.length) {
+        html += '<div class="picker-section-label">In store</div>';
+        html += inStore.map(function (e) { return rowHtml(e, [e.size, e.colour].filter(Boolean).join(" · ")); }).join("");
+      }
+      if (handover.length) {
+        html += '<div class="picker-section-label">Hand over from another team</div>';
+        html += handover.map(function (e) {
+          var co = checkoutById(e.currentCheckoutId);
+          var hopsLeft = MAX_CASCADE_DEPTH - ((co && co.cascadeDepth) || 0);
+          return rowHtml(e, "currently with " + (co ? co.name : "?") + " · " + hopsLeft + " hand-over" + (hopsLeft === 1 ? "" : "s") + " left after this");
+        }).join("");
+      }
+      if (atCap) {
+        html += '<div class="picker-empty">' + atCap + ' item(s) have reached the ' + MAX_CASCADE_DEPTH + '-hand-over limit and must be checked in to store first.</div>';
+      }
+    }
+    list.innerHTML = html;
     Array.prototype.forEach.call(list.querySelectorAll(".picker-item"), function (row) {
-      row.addEventListener("click", function (evt) {
+      row.addEventListener("click", function () {
         var id = row.getAttribute("data-id");
         var idx = checkoutForm.equipmentIds.indexOf(id);
         if (idx > -1) checkoutForm.equipmentIds.splice(idx, 1);
@@ -955,49 +995,78 @@
       var sigData = byId("sigCanvas").toDataURL("image/png");
       var nowIso = new Date().toISOString();
       var actionId = uid();
-      var checkedOutNames = [];
+      var freshCount = 0;
+      var handoverCount = 0;
       var skipped = [];
+      var cappedSkipped = [];
 
       for (var i = 0; i < checkoutForm.equipmentIds.length; i++) {
         var equipmentId = checkoutForm.equipmentIds[i];
         var eqRef = equipmentCol.doc(equipmentId);
         var snap = await eqRef.get();
-        if (!snap.exists || snap.data().status !== "in_store") {
-          skipped.push(equipmentId);
-          continue;
-        }
+        if (!snap.exists) { skipped.push(equipmentId); continue; }
         var eqData = snap.data();
+        var snapshot = { type: eqData.type, size: eqData.size || "", colour: eqData.colour || "", idTag: eqData.idTag };
         var checkoutRef = checkoutsCol.doc();
-        await eqRef.update({ status: "checked_out", currentCheckoutId: checkoutRef.id });
-        await checkoutRef.set({
-          equipmentId: equipmentId,
-          equipmentSnapshot: { type: eqData.type, size: eqData.size || "", colour: eqData.colour || "", idTag: eqData.idTag },
-          name: name, team: team, location: location,
-          checkOutTime: new Date(time).toISOString(),
-          dueDate: due,
-          checkedOutBy: authoriser,
-          signature: sigData,
-          status: "open",
-          checkinId: null,
-          createdAt: nowIso,
-          actionId: actionId,
-          cascadeDepth: 0,
-          precedingCheckoutId: null
-        });
-        checkedOutNames.push(eqData.type + " (" + eqData.idTag + ")");
+
+        if (eqData.status === "in_store") {
+          // fresh check-out from the store
+          await eqRef.update({ status: "checked_out", currentCheckoutId: checkoutRef.id });
+          await checkoutRef.set({
+            equipmentId: equipmentId, equipmentSnapshot: snapshot,
+            name: name, team: team, location: location,
+            checkOutTime: new Date(time).toISOString(), dueDate: due,
+            checkedOutBy: authoriser, signature: sigData,
+            status: "open", checkinId: null, createdAt: nowIso,
+            actionId: actionId, cascadeDepth: 0, precedingCheckoutId: null
+          });
+          freshCount++;
+        } else if (eqData.status === "checked_out" && eqData.currentCheckoutId) {
+          // hand-over from whoever currently has it — closes their check-out and opens a new one
+          var oldCheckoutId = eqData.currentCheckoutId;
+          var oldCheckout = checkoutById(oldCheckoutId);
+          var oldDepth = (oldCheckout && oldCheckout.cascadeDepth) || 0;
+          if (oldDepth >= MAX_CASCADE_DEPTH) { cappedSkipped.push(equipmentId); continue; }
+
+          var checkinRef = checkinsCol.doc();
+          await checkinRef.set({
+            equipmentId: equipmentId, checkoutId: oldCheckoutId, equipmentSnapshot: snapshot,
+            name: name, team: team, location: location,
+            checkInTime: new Date(time).toISOString(), checkedInBy: authoriser,
+            createdAt: nowIso, actionId: actionId,
+            cascaded: true, cascadedToCheckoutId: checkoutRef.id
+          });
+          await checkoutRef.set({
+            equipmentId: equipmentId, equipmentSnapshot: snapshot,
+            name: name, team: team, location: location,
+            checkOutTime: new Date(time).toISOString(), dueDate: due,
+            checkedOutBy: authoriser, signature: sigData,
+            status: "open", checkinId: null, createdAt: nowIso,
+            actionId: actionId, cascadeDepth: oldDepth + 1, precedingCheckoutId: oldCheckoutId
+          });
+          await checkoutsCol.doc(oldCheckoutId).update({ status: "closed", checkinId: checkinRef.id });
+          await eqRef.update({ currentCheckoutId: checkoutRef.id }); // status stays "checked_out"
+          handoverCount++;
+        } else {
+          skipped.push(equipmentId);
+        }
       }
 
-      if (!checkedOutNames.length) {
-        showBanner("coBanner", "All selected items were just checked out by someone else. Refresh and pick again.");
+      var totalDone = freshCount + handoverCount;
+      if (!totalDone) {
+        showBanner("coBanner", "Those items are no longer available — refresh and pick again.");
         checkoutForm.equipmentIds = [];
         renderCheckoutPicker();
         return;
       }
-      if (skipped.length) {
-        toast(checkedOutNames.length + " item(s) checked out to " + name + " — " + skipped.length + " were taken by someone else first.", true);
-      } else {
-        toast((checkedOutNames.length > 1 ? checkedOutNames.length + " items" : checkedOutNames[0]) + " checked out to " + name);
-      }
+      var parts = [];
+      if (freshCount) parts.push(freshCount + " from store");
+      if (handoverCount) parts.push(handoverCount + " handed over");
+      var msg = totalDone + " item(s) checked out to " + name + " (" + parts.join(", ") + ").";
+      var hadIssues = skipped.length || cappedSkipped.length;
+      if (skipped.length) msg += " " + skipped.length + " item(s) were no longer available.";
+      if (cappedSkipped.length) msg += " " + cappedSkipped.length + " item(s) hit the " + MAX_CASCADE_DEPTH + "-hand-over limit — check them in to store first.";
+      toast(msg, !!hadIssues);
       renderCheckoutTab(byId("main"));
     } catch (e) {
       console.error(e);
@@ -1012,11 +1081,9 @@
   // =================================================================
   function renderCheckinTab(main) {
     checkinForm.equipmentIds = [];
-    checkinForm.passOn = false;
-    checkinForm.hasSig = false;
     main.innerHTML =
       '<h2>Check equipment in</h2>' +
-      '<p class="tab-desc">Find items by ID tag or type — anyone can check something back in, they don\u2019t need to be the person who took it out. Select more than one to return several at once.</p>' +
+      '<p class="tab-desc">Find items by ID tag or type — anyone can check something back in, they don\u2019t need to be the person who took it out. Select more than one to return several at once. If it\u2019s going straight to another team rather than back to the store, use the Check Out tab instead — that\u2019s where the new team signs for it.</p>' +
       '<div class="grid-2">' +
         '<div class="panel"><h3>1. Choose items <span id="ciSelCount" style="font-weight:400;font-size:0.78rem;color:var(--text-soft);"></span></h3>' +
           '<div class="field"><input type="text" id="ciSearch" placeholder="Search by type or ID tag…"></div>' +
@@ -1025,8 +1092,7 @@
         '<div class="panel"><h3>2. Confirm the return</h3><div id="ciDetails">' +
           '<p class="tab-desc">Select one or more checked-out items to see who has them.</p>' +
           '</div></div>' +
-      '</div>' +
-      '<div id="ciCascadeWrap"></div>';
+      '</div>';
     renderCheckinPicker();
     byId("ciSearch").addEventListener("input", renderCheckinPicker);
   }
@@ -1082,11 +1148,9 @@
 
   function renderCheckinDetails() {
     var wrap = byId("ciDetails");
-    var cascadeWrap = byId("ciCascadeWrap");
     if (!wrap) return;
     if (!checkinForm.equipmentIds.length) {
       wrap.innerHTML = '<p class="tab-desc">Select one or more checked-out items to see who has them.</p>';
-      if (cascadeWrap) cascadeWrap.innerHTML = "";
       return;
     }
     var selected = checkinForm.equipmentIds.map(function (id) {
@@ -1095,7 +1159,6 @@
 
     if (!selected.length) {
       wrap.innerHTML = '<p class="tab-desc">Select one or more checked-out items to see who has them.</p>';
-      if (cascadeWrap) cascadeWrap.innerHTML = "";
       return;
     }
 
@@ -1104,12 +1167,6 @@
       var overdue = isOverdue(s.co.dueDate);
       return '<div class="banner info" style="margin-bottom:6px;">' + esc(s.eq.type) + ' (' + esc(s.eq.idTag) + ') — with <strong>' + esc(s.co.name) + '</strong> (' + esc(s.co.team) + ')' + (overdue ? ' — <strong>overdue</strong>' : '') + '</div>';
     }).join("");
-
-    // deepest cascade level among the selected items, so we know if pass-on is still allowed
-    var maxDepth = Math.max.apply(null, selected.map(function (s) { return s.co.cascadeDepth || 0; }));
-    var canCascade = maxDepth < MAX_CASCADE_DEPTH;
-    var someAtCap = selected.some(function (s) { return (s.co.cascadeDepth || 0) >= MAX_CASCADE_DEPTH; });
-    if (!canCascade) checkinForm.passOn = false;
 
     wrap.innerHTML =
       summaryRows +
@@ -1123,56 +1180,12 @@
         '<div class="field"><label for="ciAuthoriser">Checked in by</label><select id="ciAuthoriser"></select></div>' +
       '</div>' +
       (selected.length > 1 ? '<p class="hint">These details are recorded against all ' + selected.length + ' selected items.</p>' : '') +
-      '<label style="display:flex;align-items:center;gap:8px;font-size:0.88rem;margin:10px 0;' + (canCascade ? "" : "opacity:0.5;") + '">' +
-        '<input type="checkbox" id="ciPassOn" style="width:auto;" ' + (canCascade ? "" : "disabled") + (checkinForm.passOn ? " checked" : "") + '> Pass this straight on to another team, rather than putting it back in store' +
-      '</label>' +
-      (canCascade ? '' : '<p class="hint">' + (someAtCap ? "One or more selected items have" : "This item has") + ' already been passed on ' + MAX_CASCADE_DEPTH + ' times, the most allowed — it needs to go back into store.</p>') +
       '<div id="ciBanner"></div>' +
       '<button class="btn" id="ciSubmit" type="button">Complete check-in</button>';
 
     byId("ciTime").value = nowLocalDatetimeValue();
     refreshAuthoriserSelect("ciAuthoriser");
     byId("ciSubmit").addEventListener("click", submitCheckin);
-    if (canCascade) {
-      byId("ciPassOn").addEventListener("change", function () {
-        checkinForm.passOn = this.checked;
-        renderCascadeForm(first.location);
-      });
-    }
-    renderCascadeForm(first.location);
-  }
-
-  function renderCascadeForm(defaultLocation) {
-    var cascadeWrap = byId("ciCascadeWrap");
-    if (!cascadeWrap) return;
-    if (!checkinForm.passOn) {
-      cascadeWrap.innerHTML = "";
-      checkinForm.hasSig = false;
-      return;
-    }
-    cascadeWrap.innerHTML =
-      '<div class="panel"><h3>3. New team taking it on</h3>' +
-        '<div class="field"><label for="ncName">Name</label><input type="text" id="ncName" placeholder="Who\u2019s taking it"></div>' +
-        '<div class="field-row">' +
-          '<div class="field"><label for="ncTeam">Team</label><input type="text" id="ncTeam" placeholder="e.g. U16 Girls"></div>' +
-          '<div class="field"><label for="ncLocation">Location used at</label><input type="text" id="ncLocation" value="' + esc(defaultLocation || "") + '"></div>' +
-        '</div>' +
-        '<div class="field-row">' +
-          '<div class="field"><label for="ncTime">New check-out time</label><input type="datetime-local" id="ncTime"></div>' +
-          '<div class="field"><label for="ncDue">New check-in due date</label><input type="date" id="ncDue"></div>' +
-        '</div>' +
-        '<div class="field"><label for="ncAuthoriser">Checked out by</label><select id="ncAuthoriser"></select></div>' +
-        '<div class="agreement">By signing below, I confirm I am taking responsibility for the safe return of this equipment, and that I will replace any missing or damaged item(s) at my own expense if it is not returned in the same condition.</div>' +
-        '<div class="sig-wrap"><canvas id="ncSigCanvas"></canvas></div>' +
-        '<div class="sig-actions">' +
-          '<button class="btn secondary small" id="ncSigClear" type="button">Clear signature</button>' +
-          '<label style="display:flex;align-items:center;gap:8px;font-size:0.85rem;"><input type="checkbox" id="ncAgree" style="width:auto;"> I have read and accept the terms above</label>' +
-        '</div>' +
-      '</div>';
-    byId("ncTime").value = nowLocalDatetimeValue();
-    byId("ncDue").value = plusDaysISODate(7);
-    refreshAuthoriserSelect("ncAuthoriser");
-    setupSignaturePad("ncSigCanvas", "ncSigClear", function (drawn) { checkinForm.hasSig = drawn; });
   }
 
   async function submitCheckin() {
@@ -1191,55 +1204,23 @@
     if (!time) return showBanner("ciBanner", "Set the check-in time.");
     if (!authoriser) return showBanner("ciBanner", "Choose who\u2019s checking it in (add authorisers in Settings if the list is empty).");
 
-    var passOn = checkinForm.passOn;
-    var ncName, ncTeam, ncLocation, ncTime, ncDue, ncAuthoriser, ncAgreed, ncSigData;
-    if (passOn) {
-      ncName = byId("ncName").value.trim();
-      ncTeam = byId("ncTeam").value.trim();
-      ncLocation = byId("ncLocation").value.trim();
-      ncTime = byId("ncTime").value;
-      ncDue = byId("ncDue").value;
-      ncAuthoriser = byId("ncAuthoriser").value;
-      ncAgreed = byId("ncAgree").checked;
-      if (!ncName) return showBanner("ciBanner", "Enter the new team\u2019s borrower name.");
-      if (!ncTeam) return showBanner("ciBanner", "Enter the new team.");
-      if (!ncLocation) return showBanner("ciBanner", "Enter the location the new team will use it at.");
-      if (!ncTime) return showBanner("ciBanner", "Set the new check-out time.");
-      if (!ncDue) return showBanner("ciBanner", "Set a new check-in due date.");
-      if (!ncAuthoriser) return showBanner("ciBanner", "Choose who\u2019s checking it out to the new team.");
-      if (!checkinForm.hasSig) return showBanner("ciBanner", "Get the new team\u2019s signature before completing the hand-off.");
-      if (!ncAgreed) return showBanner("ciBanner", "Tick the box to confirm the new team accepted the terms.");
-      ncSigData = byId("ncSigCanvas").toDataURL("image/png");
-    }
-
     var btn = byId("ciSubmit");
     btn.disabled = true;
     try {
       var actionId = uid();
       var nowIso = new Date().toISOString();
       var checkedInNames = [];
-      var cascadedNames = [];
-      var cappedNames = [];
-      var missing = [];
 
       for (var i = 0; i < checkinForm.equipmentIds.length; i++) {
         var equipmentId = checkinForm.equipmentIds[i];
         var eqRef = equipmentCol.doc(equipmentId);
         var snap = await eqRef.get();
-        if (!snap.exists || snap.data().status !== "checked_out" || !snap.data().currentCheckoutId) {
-          missing.push(equipmentId);
-          continue;
-        }
+        if (!snap.exists || snap.data().status !== "checked_out" || !snap.data().currentCheckoutId) continue;
         var eqData = snap.data();
         var oldCheckoutId = eqData.currentCheckoutId;
-        var oldCheckout = checkoutById(oldCheckoutId);
-        var oldDepth = (oldCheckout && oldCheckout.cascadeDepth) || 0;
-        var willCascade = passOn && oldDepth < MAX_CASCADE_DEPTH;
         var snapshot = { type: eqData.type, size: eqData.size || "", colour: eqData.colour || "", idTag: eqData.idTag };
 
         var checkinRef = checkinsCol.doc();
-        var newCheckoutRef = willCascade ? checkoutsCol.doc() : null;
-
         await checkinRef.set({
           equipmentId: equipmentId,
           checkoutId: oldCheckoutId,
@@ -1249,50 +1230,22 @@
           checkedInBy: authoriser,
           createdAt: nowIso,
           actionId: actionId,
-          cascaded: !!willCascade,
-          cascadedToCheckoutId: willCascade ? newCheckoutRef.id : null
+          cascaded: false,
+          cascadedToCheckoutId: null
         });
-
-        if (willCascade) {
-          await newCheckoutRef.set({
-            equipmentId: equipmentId,
-            equipmentSnapshot: snapshot,
-            name: ncName, team: ncTeam, location: ncLocation,
-            checkOutTime: new Date(ncTime).toISOString(),
-            dueDate: ncDue,
-            checkedOutBy: ncAuthoriser,
-            signature: ncSigData,
-            status: "open",
-            checkinId: null,
-            createdAt: nowIso,
-            actionId: actionId,
-            cascadeDepth: oldDepth + 1,
-            precedingCheckoutId: oldCheckoutId
-          });
-          await checkoutsCol.doc(oldCheckoutId).update({ status: "closed", checkinId: checkinRef.id });
-          await eqRef.update({ status: "checked_out", currentCheckoutId: newCheckoutRef.id });
-          cascadedNames.push(eqData.type + " (" + eqData.idTag + ")");
-        } else {
-          await checkoutsCol.doc(oldCheckoutId).update({ status: "closed", checkinId: checkinRef.id });
-          await eqRef.update({ status: "in_store", currentCheckoutId: null });
-          checkedInNames.push(eqData.type + " (" + eqData.idTag + ")");
-          if (passOn && oldDepth >= MAX_CASCADE_DEPTH) cappedNames.push(eqData.type + " (" + eqData.idTag + ")");
-        }
+        await checkoutsCol.doc(oldCheckoutId).update({ status: "closed", checkinId: checkinRef.id });
+        await eqRef.update({ status: "in_store", currentCheckoutId: null });
+        checkedInNames.push(eqData.type + " (" + eqData.idTag + ")");
       }
 
-      if (!checkedInNames.length && !cascadedNames.length) {
+      if (!checkedInNames.length) {
         showBanner("ciBanner", "Those items have already been checked in. Refresh and pick again.");
         checkinForm.equipmentIds = [];
         renderCheckinPicker();
         return;
       }
 
-      var msgParts = [];
-      if (checkedInNames.length) msgParts.push(checkedInNames.length + " checked in");
-      if (cascadedNames.length) msgParts.push(cascadedNames.length + " passed on to " + ncName);
-      var msg = msgParts.join(", ") + ".";
-      if (cappedNames.length) msg += " " + cappedNames.length + " hit the " + MAX_CASCADE_DEPTH + "-cascade limit and went to store instead.";
-      toast(msg, cappedNames.length > 0);
+      toast((checkedInNames.length > 1 ? checkedInNames.length + " items" : checkedInNames[0]) + " checked in.");
       renderCheckinTab(byId("main"));
     } catch (e) {
       console.error(e);
