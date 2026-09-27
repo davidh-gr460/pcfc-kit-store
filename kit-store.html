@@ -3,11 +3,20 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#16302A">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Kit Store">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <title>PCFC Kit Store</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
 <style>
   :root {
     --pitch-900: #12261F;
@@ -530,6 +539,71 @@
     font-size: 0.9rem;
   }
   .icon-btn:hover { color: var(--tag-red); background: var(--tag-red-bg); }
+  .icon-btn[data-menu]:hover { color: var(--text); background: var(--chalk-200); }
+  .row-menu {
+    position: fixed;
+    z-index: 80;
+    min-width: 150px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: 0 6px 20px rgba(0,0,0,0.18);
+    overflow: hidden;
+    padding: 4px;
+  }
+  .row-menu button {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: transparent;
+    border: none;
+    padding: 9px 12px;
+    font-size: 0.88rem;
+    color: var(--text);
+    border-radius: var(--radius);
+  }
+  .row-menu button:hover { background: var(--tag-green-bg); }
+  .row-menu button[data-action="remove"] { color: var(--tag-red); }
+  .row-menu button[data-action="remove"]:hover { background: var(--tag-red-bg); }
+  .eq-thumb { width: 34px; height: 34px; object-fit: cover; border-radius: var(--radius); border: 1px solid var(--border); display: block; }
+  .eq-thumb-empty { display: flex; align-items: center; justify-content: center; background: var(--chalk-200); font-size: 1rem; color: var(--text-soft); }
+  .scan-modal {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.75);
+    z-index: 150;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+  .scan-box { background: var(--panel); border-radius: var(--radius); padding: 16px; max-width: 380px; width: 100%; text-align: center; }
+  .scan-box video { width: 100%; border-radius: var(--radius); background: #000; max-height: 320px; object-fit: cover; }
+  #scanStatus { margin: 10px 0; font-size: 0.85rem; color: var(--text-soft); min-height: 20px; }
+  .stat-card-row { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 20px; }
+  .stat-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-top: 3px solid var(--pitch-600);
+    border-radius: var(--radius);
+    padding: 12px 16px;
+    min-width: 110px;
+    flex: 1 1 110px;
+  }
+  .stat-card-num { font-family: 'Oswald', sans-serif; font-size: 1.5rem; line-height: 1; }
+  .stat-card-label { font-size: 0.74rem; color: var(--text-soft); margin-top: 4px; }
+  .rank-list { list-style: none; margin: 0; padding: 0; }
+  .rank-list li {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 4px;
+    border-bottom: 1px solid var(--border);
+    font-size: 0.9rem;
+  }
+  .rank-list li:last-child { border-bottom: none; }
+  .rank-list .rank-num { color: var(--text-soft); font-weight: 600; margin-right: 8px; font-family: 'Oswald', sans-serif; }
+  .rank-count { color: var(--text-soft); font-size: 0.8rem; flex-shrink: 0; margin-left: 10px; }
 </style>
 </head>
 <body>
@@ -556,6 +630,14 @@
 <datalist id="nameList"></datalist>
 <datalist id="teamList"></datalist>
 <datalist id="locationList"></datalist>
+<div class="scan-modal" id="scanModal" style="display:none;">
+  <div class="scan-box">
+    <video id="scanVideo" playsinline muted autoplay></video>
+    <canvas id="scanCanvas" style="display:none;"></canvas>
+    <div id="scanStatus">Point the camera at a QR label…</div>
+    <button class="btn secondary" id="scanClose" type="button">Close scanner</button>
+  </div>
+</div>
 <div class="lock-screen" id="lockScreen">
   <div class="lock-box" id="lockBox">
     <h2>PCFC Kit Store</h2>
@@ -578,6 +660,7 @@
     { id: "checkout",  label: "Check Out" },
     { id: "checkin",   label: "Check In" },
     { id: "history",   label: "History" },
+    { id: "stats",     label: "Stats" },
     { id: "equipment", label: "Equipment" },
     { id: "settings",  label: "Settings" }
   ];
@@ -591,6 +674,7 @@
     suggestions: { names: [], teams: [], locations: [] },
     accentColor: null,
     logoDataUrl: null,
+    publicMode: false,
     ready: { equipment: false, checkouts: false, checkins: false, settings: false }
   };
 
@@ -831,6 +915,7 @@
   // Reactions to snapshot changes — targeted, not full-tab re-renders
   // ---------------------------------------------------------------
   function onEquipmentChange() {
+    if (state.publicMode) { renderPublicView(); return; }
     renderStatStrip();
     renderSidebarCounts();
     if (state.activeTab === "dashboard") renderDashboardTables();
@@ -839,6 +924,7 @@
     if (state.activeTab === "equipment") renderEquipmentTable();
   }
   function onCheckoutsChange() {
+    if (state.publicMode) { renderPublicView(); return; }
     renderStatStrip();
     renderSidebarCounts();
     if (state.activeTab === "dashboard") renderDashboardTables();
@@ -891,7 +977,7 @@
     });
   }
 
-  var APP_VERSION = "v1.9";
+  var APP_VERSION = "v3.0";
 
   function renderNav() {
     var sidebar = byId("sidebar");
@@ -935,6 +1021,7 @@
     checkout: renderCheckoutTab,
     checkin: renderCheckinTab,
     history: renderHistoryTab,
+    stats: renderStatsTab,
     equipment: renderEquipmentTab,
     settings: renderSettingsTab
   };
@@ -947,10 +1034,46 @@
       '<h2>Dashboard</h2>' +
       '<p class="tab-desc">Live view of everything in the store and everything currently out with a team or player.</p>' +
       '<div class="grid-2">' +
-        '<div class="panel"><h3>In store</h3><div class="table-wrap" id="inStoreTableWrap"></div></div>' +
-        '<div class="panel"><h3>Checked out</h3><div class="table-wrap" id="checkedOutTableWrap"></div></div>' +
-      '</div>';
+        '<div class="panel"><h3>In store <button class="icon-btn small" id="exportInStore" type="button" style="font-weight:400;">Export CSV</button></h3><div class="table-wrap" id="inStoreTableWrap"></div></div>' +
+        '<div class="panel"><h3>Checked out <button class="icon-btn small" id="exportCheckedOut" type="button" style="font-weight:400;">Export CSV</button></h3><div class="table-wrap" id="checkedOutTableWrap"></div></div>' +
+      '</div>' +
+      '<div class="panel" id="lostPanel" style="display:none;"><h3>Lost / written off</h3><div class="table-wrap" id="lostTableWrap"></div></div>';
     renderDashboardTables();
+    byId("exportInStore").addEventListener("click", function () {
+      exportCsv("in-store.csv", ["Type", "Size", "Colour", "Qty", "ID tag", "Notes"],
+        state.equipment.filter(function (e) { return e.status === "in_store"; })
+          .map(function (e) { return [e.type, e.size, e.colour, e.quantity, e.idTag, e.description]; }));
+    });
+    byId("exportCheckedOut").addEventListener("click", function () {
+      exportCsv("checked-out.csv", ["Type", "ID tag", "Held by", "Team", "Location", "Checked out", "Due back", "Overdue"],
+        state.equipment.filter(function (e) { return e.status === "checked_out"; }).map(function (e) {
+          var co = checkoutById(e.currentCheckoutId);
+          return [e.type, e.idTag, co && co.name, co && co.team, co && co.location, co && fmtDateTime(co.checkOutTime), co && fmtDate(co.dueDate), co && isOverdue(co.dueDate) ? "Yes" : "No"];
+        }));
+    });
+  }
+
+  // ---------------------------------------------------------------
+  // CSV export — builds a proper quoted/escaped CSV and triggers a download
+  // ---------------------------------------------------------------
+  function csvEscape(v) {
+    if (v === null || v === undefined) return "";
+    var s = String(v);
+    if (/[",\n]/.test(s)) s = '"' + s.replace(/"/g, '""') + '"';
+    return s;
+  }
+  function exportCsv(filename, headers, rows) {
+    var lines = [headers.map(csvEscape).join(",")];
+    rows.forEach(function (row) { lines.push(row.map(csvEscape).join(",")); });
+    var blob = new Blob(["\uFEFF" + lines.join("\r\n")], { type: "text/csv;charset=utf-8;" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
   }
 
   function renderDashboardTables() {
@@ -974,13 +1097,21 @@
     }
 
     var checkedOut = state.equipment.filter(function (e) { return e.status === "checked_out"; });
+    // overdue items surface first, then soonest-due, so the things needing attention aren't buried
+    checkedOut.sort(function (a, b) {
+      var coA = checkoutById(a.currentCheckoutId), coB = checkoutById(b.currentCheckoutId);
+      var overdueA = coA && isOverdue(coA.dueDate) ? 0 : 1;
+      var overdueB = coB && isOverdue(coB.dueDate) ? 0 : 1;
+      if (overdueA !== overdueB) return overdueA - overdueB;
+      return (coA && coA.dueDate || "").localeCompare(coB && coB.dueDate || "");
+    });
     if (!state.ready.equipment || !state.ready.checkouts) {
       outWrap.innerHTML = '<p class="tab-desc">Loading…</p>';
     } else if (!checkedOut.length) {
       outWrap.innerHTML = '<p class="tab-desc">Nothing checked out right now.</p>';
     } else {
       outWrap.innerHTML =
-        '<table><thead><tr><th>Item</th><th>Held by</th><th>Team</th><th>Due back</th></tr></thead><tbody>' +
+        '<table><thead><tr><th>Item</th><th>Held by</th><th>Team</th><th>Due back</th><th></th></tr></thead><tbody>' +
         checkedOut.map(function (e) {
           var co = checkoutById(e.currentCheckoutId);
           var overdue = co && isOverdue(co.dueDate);
@@ -989,8 +1120,42 @@
             '<td>' + (co ? esc(co.name) : "—") + '</td>' +
             '<td>' + (co ? esc(co.team) : "—") + '</td>' +
             '<td>' + (co ? (overdue ? '<span class="status-chip overdue">Overdue · ' + esc(fmtDate(co.dueDate)) + '</span>' : esc(fmtDate(co.dueDate))) : "—") + '</td>' +
+            '<td>' + (overdue ? '<button class="icon-btn" data-remind="' + esc(e.id) + '" type="button" style="color:var(--tag-amber);">Copy reminder</button>' : '') + '</td>' +
             '</tr>';
         }).join("") + '</tbody></table>';
+      Array.prototype.forEach.call(outWrap.querySelectorAll("[data-remind]"), function (b) {
+        b.addEventListener("click", function () { copyReminderText(b.getAttribute("data-remind")); });
+      });
+    }
+
+    var lost = state.equipment.filter(function (e) { return e.status === "lost"; });
+    var lostPanel = byId("lostPanel");
+    if (lostPanel) {
+      if (lost.length) {
+        lostPanel.style.display = "";
+        byId("lostTableWrap").innerHTML =
+          '<table><thead><tr><th>Type</th><th>ID tag</th><th>Notes</th></tr></thead><tbody>' +
+          lost.map(function (e) {
+            return '<tr><td>' + esc(e.type) + '</td><td><span class="tag-chip">' + esc(e.idTag) + '</span></td><td>' + esc(e.description || "—") + '</td></tr>';
+          }).join("") + '</tbody></table>';
+      } else {
+        lostPanel.style.display = "none";
+      }
+    }
+  }
+
+  function copyReminderText(equipmentId) {
+    var eq = equipmentById(equipmentId);
+    var co = eq ? checkoutById(eq.currentCheckoutId) : null;
+    if (!eq || !co) return;
+    var msg = "Hi " + co.name + ", quick reminder from PCFC that the " + eq.type + " (" + eq.idTag + ") borrowed for " + co.team +
+      " was due back " + fmtDate(co.dueDate) + ". Could you drop it back to the kit store, or let us know? Thanks!";
+    var done = function () { toast("Reminder message copied \u2014 paste it into a text, WhatsApp or email."); };
+    var fail = function () { toast("Couldn\u2019t copy automatically \u2014 message: " + msg, true); };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(msg).then(done, fail);
+    } else {
+      fail();
     }
   }
 
@@ -1005,7 +1170,10 @@
       '<p class="tab-desc">Pick items that are in store, or items already out with another team that are being handed straight over. Record who\u2019s taking them and capture one signature to cover the whole lot — that signature is what puts responsibility on them.</p>' +
       '<div class="grid-2">' +
         '<div class="panel"><h3>1. Choose items <span id="coSelCount" style="font-weight:400;font-size:0.78rem;color:var(--text-soft);"></span></h3>' +
-          '<div class="field"><input type="text" id="coSearch" placeholder="Search by type or ID tag…"></div>' +
+          '<div class="field-row">' +
+            '<div class="field" style="flex:1;"><input type="text" id="coSearch" placeholder="Search by type or ID tag…"></div>' +
+            '<div><button class="btn secondary" id="coScanBtn" type="button">\uD83D\uDCF7 Scan</button></div>' +
+          '</div>' +
           '<div class="picker" id="coEquipmentList"></div>' +
         '</div>' +
         '<div class="panel"><h3>2. Borrower details</h3>' +
@@ -1044,6 +1212,17 @@
 
     byId("coSearch").addEventListener("input", renderCheckoutPicker);
     byId("coSubmit").addEventListener("click", submitCheckout);
+    byId("coScanBtn").addEventListener("click", function () {
+      openScanner(null, function (id) {
+        var eq = equipmentById(id);
+        var co = eq ? checkoutById(eq.currentCheckoutId) : null;
+        var eligible = eq && (eq.status === "in_store" || (eq.status === "checked_out" && co && (co.cascadeDepth || 0) < MAX_CASCADE_DEPTH));
+        if (!eligible) { toast("That item isn\u2019t available to check out right now.", true); return; }
+        if (checkoutForm.equipmentIds.indexOf(id) === -1) checkoutForm.equipmentIds.push(id);
+        renderCheckoutPicker();
+        toast("Added " + eq.type + " (" + eq.idTag + ").");
+      });
+    });
   }
 
   // Quick day-offset buttons for the due date, anchored to the check-out date,
@@ -1165,6 +1344,87 @@
       }
     });
   }
+
+  // ---------------------------------------------------------------
+  // QR/barcode camera scanner — matches decoded text against equipment ID tags.
+  // onMatch(equipmentId) is called and the scanner auto-closes on a hit.
+  // ---------------------------------------------------------------
+  var scanState = { stream: null, rafId: null, onMatch: null };
+
+  async function openScanner(statusFilter, onMatch) {
+    if (!window.jsQR) { toast("Scanner library didn\u2019t load \u2014 check your internet connection.", true); return; }
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      toast("Camera access isn\u2019t available on this browser/device.", true);
+      return;
+    }
+    scanState.onMatch = onMatch;
+    var modal = byId("scanModal");
+    var video = byId("scanVideo");
+    var statusEl = byId("scanStatus");
+    statusEl.textContent = "Point the camera at a QR label…";
+    modal.style.display = "flex";
+    try {
+      scanState.stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+      video.srcObject = scanState.stream;
+      await video.play();
+    } catch (e) {
+      console.error(e);
+      statusEl.textContent = "Couldn\u2019t access the camera — check permissions and try again.";
+      return;
+    }
+
+    var canvas = byId("scanCanvas");
+    var ctx = canvas.getContext("2d");
+
+    function tick() {
+      if (!scanState.stream) return;
+      if (video.readyState === video.HAVE_ENOUGH_DATA) {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        var imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        var code = jsQR(imageData.data, imageData.width, imageData.height);
+        if (code && code.data) {
+          var match = state.equipment.find(function (e) {
+            return (e.idTag || "").toLowerCase() === code.data.trim().toLowerCase() && (!statusFilter || e.status === statusFilter);
+          });
+          if (match) {
+            statusEl.textContent = "Found: " + match.type + " (" + match.idTag + ")";
+            var cb = scanState.onMatch;
+            closeScanner();
+            if (cb) cb(match.id);
+            return;
+          } else {
+            statusEl.textContent = "No matching item for \u201C" + code.data + "\u201D — keep scanning.";
+          }
+        }
+      }
+      scanState.rafId = requestAnimationFrame(tick);
+    }
+    scanState.rafId = requestAnimationFrame(tick);
+  }
+
+  function closeScanner() {
+    var modal = byId("scanModal");
+    if (modal) modal.style.display = "none";
+    if (scanState.rafId) cancelAnimationFrame(scanState.rafId);
+    scanState.rafId = null;
+    if (scanState.stream) {
+      scanState.stream.getTracks().forEach(function (t) { t.stop(); });
+      scanState.stream = null;
+    }
+    scanState.onMatch = null;
+  }
+
+  (function initScanModalClose() {
+    document.addEventListener("DOMContentLoaded", function () {
+      var closeBtn = byId("scanClose");
+      if (closeBtn) closeBtn.addEventListener("click", closeScanner);
+    });
+    // in case DOMContentLoaded already fired (script is at end of body)
+    var closeBtnNow = byId("scanClose");
+    if (closeBtnNow) closeBtnNow.addEventListener("click", closeScanner);
+  })();
 
   function refreshAuthoriserSelect(selectId) {
     var sel = byId(selectId);
@@ -1341,7 +1601,10 @@
       '<p class="tab-desc">Find items by ID tag or type — anyone can check something back in, they don\u2019t need to be the person who took it out. Select more than one to return several at once. If it\u2019s going straight to another team rather than back to the store, use the Check Out tab instead — that\u2019s where the new team signs for it.</p>' +
       '<div class="grid-2">' +
         '<div class="panel"><h3>1. Choose items <span id="ciSelCount" style="font-weight:400;font-size:0.78rem;color:var(--text-soft);"></span></h3>' +
-          '<div class="field"><input type="text" id="ciSearch" placeholder="Search by type or ID tag…"></div>' +
+          '<div class="field-row">' +
+            '<div class="field" style="flex:1;"><input type="text" id="ciSearch" placeholder="Search by type or ID tag…"></div>' +
+            '<div><button class="btn secondary" id="ciScanBtn" type="button">\uD83D\uDCF7 Scan</button></div>' +
+          '</div>' +
           '<div class="picker" id="ciEquipmentList"></div>' +
         '</div>' +
         '<div class="panel"><h3>2. Confirm the return</h3><div id="ciDetails">' +
@@ -1350,6 +1613,14 @@
       '</div>';
     renderCheckinPicker();
     byId("ciSearch").addEventListener("input", renderCheckinPicker);
+    byId("ciScanBtn").addEventListener("click", function () {
+      openScanner("checked_out", function (id) {
+        var eq = equipmentById(id);
+        if (checkinForm.equipmentIds.indexOf(id) === -1) checkinForm.equipmentIds.push(id);
+        renderCheckinPicker();
+        toast("Added " + eq.type + " (" + eq.idTag + ").");
+      });
+    });
   }
 
   function renderCheckinPicker() {
@@ -1612,8 +1883,31 @@
     main.innerHTML =
       '<h2>History</h2>' +
       '<p class="tab-desc">Each loan is traced from the original check-out through any hand-overs to its return — so you can follow an item\u2019s whole journey in one place, in order.</p>' +
+      '<div style="margin-bottom:14px;"><button class="btn secondary small" id="exportHistory" type="button">Export CSV</button></div>' +
       '<div id="historyChains"></div>';
     renderHistoryTable();
+    byId("exportHistory").addEventListener("click", exportHistoryCsv);
+  }
+
+  function exportHistoryCsv() {
+    var rows = [];
+    state.checkouts.filter(function (c) { return !c.precedingCheckoutId; }).forEach(function (start) {
+      buildLoanChain(start).forEach(function (hop, i) {
+        var co = hop.checkout, ci = hop.checkin;
+        rows.push([
+          co.equipmentSnapshot ? co.equipmentSnapshot.type : "",
+          co.equipmentSnapshot ? co.equipmentSnapshot.idTag : "",
+          i + 1,
+          co.name, co.team, co.location,
+          fmtDateTime(co.checkOutTime), co.checkedOutBy, fmtDate(co.dueDate),
+          ci ? fmtDateTime(ci.checkInTime) : "", ci ? ci.checkedInBy : "",
+          !ci ? (isOverdue(co.dueDate) ? "Still out — overdue" : "Still out") : (ci.cascaded ? "Handed over" : "Returned to store")
+        ]);
+      });
+    });
+    exportCsv("loan-history.csv",
+      ["Type", "ID tag", "Hop #", "Borrower", "Team", "Location", "Checked out", "Checked out by", "Due back", "Checked in", "Checked in by", "Result"],
+      rows);
   }
 
   function checkinById(id) {
@@ -1696,6 +1990,70 @@
   }
 
   // =================================================================
+  // STATS
+  // =================================================================
+  function renderStatsTab(main) {
+    var totalItems = state.equipment.length;
+    var inStoreCount = state.equipment.filter(function (e) { return e.status === "in_store"; }).length;
+    var outCount = state.equipment.filter(function (e) { return e.status === "checked_out"; }).length;
+    var lostCount = state.equipment.filter(function (e) { return e.status === "lost"; }).length;
+    var overdueCount = state.checkouts.filter(function (c) { return c.status === "open" && isOverdue(c.dueDate); }).length;
+    var totalLoans = state.checkouts.length;
+
+    var itemCounts = {}, itemLabels = {};
+    var teamCounts = {};
+    var durations = [];
+    state.checkouts.forEach(function (c) {
+      var key = c.equipmentId || (c.equipmentSnapshot && c.equipmentSnapshot.idTag) || "?";
+      itemCounts[key] = (itemCounts[key] || 0) + 1;
+      itemLabels[key] = c.equipmentSnapshot ? (c.equipmentSnapshot.type + " (" + c.equipmentSnapshot.idTag + ")") : key;
+      if (c.team) teamCounts[c.team] = (teamCounts[c.team] || 0) + 1;
+      if (c.checkinId) {
+        var ci = checkinById(c.checkinId);
+        if (ci && !ci.cascaded && c.checkOutTime && ci.checkInTime) {
+          var days = (new Date(ci.checkInTime) - new Date(c.checkOutTime)) / 86400000;
+          if (days >= 0) durations.push(days);
+        }
+      }
+    });
+
+    function topN(counts, labels, n) {
+      return Object.keys(counts).map(function (k) { return { label: labels ? labels[k] : k, count: counts[k] }; })
+        .sort(function (a, b) { return b.count - a.count; }).slice(0, n);
+    }
+    var topItems = topN(itemCounts, itemLabels, 5);
+    var topTeams = topN(teamCounts, null, 5);
+    var avgDays = durations.length ? (durations.reduce(function (a, b) { return a + b; }, 0) / durations.length) : null;
+
+    function statCard(label, value) {
+      return '<div class="stat-card"><div class="stat-card-num">' + esc(value) + '</div><div class="stat-card-label">' + esc(label) + '</div></div>';
+    }
+    function rankList(items, unit) {
+      if (!items.length) return '<p class="tab-desc">No data yet.</p>';
+      return '<ol class="rank-list">' + items.map(function (it, i) {
+        return '<li><span><span class="rank-num">' + (i + 1) + '.</span>' + esc(it.label) + '</span><span class="rank-count">' + it.count + ' ' + unit + '</span></li>';
+      }).join("") + '</ol>';
+    }
+
+    main.innerHTML =
+      '<h2>Stats</h2>' +
+      '<p class="tab-desc">A quick read on how the kit store is being used, based on everything recorded so far.</p>' +
+      '<div class="stat-card-row">' +
+        statCard("Items in catalog", totalItems) +
+        statCard("In store", inStoreCount) +
+        statCard("Checked out", outCount) +
+        statCard("Overdue", overdueCount) +
+        statCard("Lost", lostCount) +
+        statCard("Total loans logged", totalLoans) +
+        statCard("Avg. loan length", avgDays !== null ? avgDays.toFixed(1) + "d" : "—") +
+      '</div>' +
+      '<div class="grid-2">' +
+        '<div class="panel"><h3>Most borrowed items</h3>' + rankList(topItems, "loans") + '</div>' +
+        '<div class="panel"><h3>Most active teams</h3>' + rankList(topTeams, "loans") + '</div>' +
+      '</div>';
+  }
+
+  // =================================================================
   // EQUIPMENT (catalog management)
   // =================================================================
   var equipmentEditingId = null;
@@ -1720,10 +2078,113 @@
         '<button class="btn" id="eqAdd" type="button">Add to catalog</button>' +
         '<button class="btn secondary" id="eqCancelEdit" type="button" style="display:none;margin-left:8px;">Cancel</button>' +
       '</div>' +
-      '<div class="panel"><h3>All items</h3><div class="table-wrap" id="eqTableWrap"></div></div>';
+      '<div class="panel"><h3>Bulk import</h3>' +
+        '<p class="tab-desc" style="margin-bottom:10px;">Paste rows as <code>type, quantity, size, colour, idTag, description</code> — one item per line. Quantity/size/colour/description can be left blank.</p>' +
+        '<div class="field"><textarea id="bulkImportText" rows="4" placeholder="Training bibs, 12, M, Claret, BIB-01\nMatch ball, 1, Size 5, White, BALL-01"></textarea></div>' +
+        '<div id="bulkImportBanner"></div>' +
+        '<button class="btn" id="bulkImportBtn" type="button">Import rows</button>' +
+        '<button class="btn secondary" id="bulkTemplateBtn" type="button" style="margin-left:8px;">Download template</button>' +
+      '</div>' +
+      '<div class="panel"><h3>All items <button class="icon-btn small" id="exportCatalog" type="button" style="font-weight:400;">Export CSV</button> <button class="icon-btn small" id="printLabelsBtn" type="button" style="font-weight:400;">Print QR labels</button></h3><div class="table-wrap" id="eqTableWrap"></div></div>';
     byId("eqAdd").addEventListener("click", saveEquipment);
     byId("eqCancelEdit").addEventListener("click", function () { exitEquipmentEditMode(); });
+    byId("bulkImportBtn").addEventListener("click", runBulkImport);
+    byId("bulkTemplateBtn").addEventListener("click", function () {
+      exportCsv("equipment-import-template.csv", ["type", "quantity", "size", "colour", "idTag", "description"],
+        [["Training bibs", 12, "M", "Claret", "BIB-01", ""], ["Match ball", 1, "Size 5", "White", "BALL-01", ""]]);
+    });
+    byId("exportCatalog").addEventListener("click", function () {
+      exportCsv("equipment-catalog.csv", ["Type", "Quantity", "Size", "Colour", "ID tag", "Description", "Status"],
+        state.equipment.map(function (e) { return [e.type, e.quantity, e.size, e.colour, e.idTag, e.description, e.status]; }));
+    });
+    byId("printLabelsBtn").addEventListener("click", printQrLabels);
     renderEquipmentTable();
+  }
+
+  // Accepts CSV-ish or plain comma-separated lines; tolerant of a header row.
+  async function runBulkImport() {
+    showBanner("bulkImportBanner", "");
+    if (!db) { toast("Not connected to shared storage.", true); return; }
+    var raw = byId("bulkImportText").value;
+    var lines = raw.split(/\r?\n/).map(function (l) { return l.trim(); }).filter(Boolean);
+    if (!lines.length) return showBanner("bulkImportBanner", "Paste at least one row first.");
+
+    function splitCsvLine(line) {
+      var out = [], cur = "", inQ = false;
+      for (var i = 0; i < line.length; i++) {
+        var c = line[i];
+        if (inQ) {
+          if (c === '"' && line[i + 1] === '"') { cur += '"'; i++; }
+          else if (c === '"') inQ = false;
+          else cur += c;
+        } else {
+          if (c === '"') inQ = true;
+          else if (c === ",") { out.push(cur); cur = ""; }
+          else cur += c;
+        }
+      }
+      out.push(cur);
+      return out.map(function (s) { return s.trim(); });
+    }
+
+    var rows = lines.map(splitCsvLine);
+    // drop an obvious header row
+    if (rows.length && /^type$/i.test(rows[0][0] || "")) rows.shift();
+    if (!rows.length) return showBanner("bulkImportBanner", "Nothing to import after removing the header row.");
+
+    var existingTags = {};
+    state.equipment.forEach(function (e) { existingTags[(e.idTag || "").toLowerCase()] = true; });
+    var seenInBatch = {};
+    var toImport = [];
+    var errors = [];
+
+    rows.forEach(function (r, i) {
+      var type = (r[0] || "").trim();
+      var quantity = parseInt(r[1], 10);
+      if (isNaN(quantity) || quantity < 1) quantity = 1;
+      var size = (r[2] || "").trim();
+      var colour = (r[3] || "").trim();
+      var idTag = (r[4] || "").trim();
+      var description = (r[5] || "").trim();
+      var lineNo = i + 1;
+      if (!type) { errors.push("Line " + lineNo + ": missing type."); return; }
+      if (!idTag) { errors.push("Line " + lineNo + ": missing ID tag."); return; }
+      var key = idTag.toLowerCase();
+      if (existingTags[key]) { errors.push("Line " + lineNo + ": ID tag \u201C" + idTag + "\u201D already exists."); return; }
+      if (seenInBatch[key]) { errors.push("Line " + lineNo + ": ID tag \u201C" + idTag + "\u201D is duplicated in this paste."); return; }
+      seenInBatch[key] = true;
+      toImport.push({ type: type, quantity: quantity, size: size, colour: colour, idTag: idTag, description: description });
+    });
+
+    if (!toImport.length) {
+      return showBanner("bulkImportBanner", "Nothing valid to import. " + errors.join(" "));
+    }
+
+    var btn = byId("bulkImportBtn");
+    btn.disabled = true;
+    try {
+      var batch = db.batch();
+      var nowIso = new Date().toISOString();
+      toImport.forEach(function (row) {
+        var ref = equipmentCol.doc();
+        batch.set(ref, {
+          type: row.type, quantity: row.quantity, size: row.size, colour: row.colour,
+          idTag: row.idTag, description: row.description,
+          status: "in_store", currentCheckoutId: null, createdAt: nowIso
+        });
+      });
+      await batch.commit();
+      byId("bulkImportText").value = "";
+      var msg = "Imported " + toImport.length + " item(s).";
+      if (errors.length) msg += " " + errors.length + " row(s) skipped: " + errors.slice(0, 3).join(" ") + (errors.length > 3 ? " …" : "");
+      toast(msg, errors.length > 0);
+      showBanner("bulkImportBanner", "");
+    } catch (e) {
+      console.error(e);
+      showBanner("bulkImportBanner", "Something went wrong importing those rows. Please try again.");
+    } finally {
+      btn.disabled = false;
+    }
   }
 
   function exitEquipmentEditMode() {
@@ -1787,35 +2248,127 @@
     if (!state.equipment.length) { wrap.innerHTML = '<p class="tab-desc">No equipment in the catalog yet — add your first item above.</p>'; return; }
     var sorted = state.equipment.slice().sort(function (a, b) { return (a.type || "").localeCompare(b.type || ""); });
     wrap.innerHTML =
-      '<table><thead><tr><th>Type</th><th>Size</th><th>Colour</th><th>Qty</th><th>ID tag</th><th>Notes</th><th>Status</th><th></th></tr></thead><tbody>' +
+      '<table><thead><tr><th></th><th>Type</th><th>Size</th><th>Colour</th><th>Qty</th><th>ID tag</th><th>Notes</th><th>Status</th><th></th></tr></thead><tbody>' +
       sorted.map(function (e) {
-        var statusChip = e.status === "in_store"
-          ? '<span class="status-chip in-store">In store</span>'
-          : '<span class="status-chip checked-out">Checked out</span>';
+        var statusChip =
+          e.status === "in_store" ? '<span class="status-chip in-store">In store</span>' :
+          e.status === "lost" ? '<span class="status-chip overdue">Lost</span>' :
+          '<span class="status-chip checked-out">Checked out</span>';
         var notesCell = e.description
           ? '<span title="' + esc(e.description) + '" style="cursor:help;color:var(--tag-amber);">\u26A0\uFE0F ' + esc(e.description.length > 28 ? e.description.slice(0, 28) + "…" : e.description) + '</span>'
           : '<span style="color:var(--text-soft);">—</span>';
+        var thumb = e.photoDataUrl ? '<img src="' + e.photoDataUrl.replace(/"/g, "&quot;") + '" class="eq-thumb" alt="">' : '<div class="eq-thumb eq-thumb-empty">\u26BD</div>';
         return '<tr' + (e.id === equipmentEditingId ? ' style="background:var(--tag-green-bg);"' : '') + '>' +
+          '<td>' + thumb + '</td>' +
           '<td>' + esc(e.type) + '</td><td>' + esc(e.size || "—") + '</td><td>' + esc(e.colour || "—") + '</td><td>' + esc(e.quantity != null ? e.quantity : "—") + '</td>' +
           '<td><span class="tag-chip">' + esc(e.idTag) + '</span></td>' +
           '<td style="max-width:180px;">' + notesCell + '</td>' +
           '<td>' + statusChip + '</td>' +
           '<td style="white-space:nowrap;">' +
-            '<button class="icon-btn" data-edit="' + esc(e.id) + '" type="button" style="color:var(--text-soft);">Edit</button>' +
-            '<button class="icon-btn" data-dup="' + esc(e.id) + '" type="button" style="color:var(--text-soft);">Duplicate</button>' +
-            (e.status === "in_store" ? '<button class="icon-btn" data-del="' + esc(e.id) + '" type="button">Remove</button>' : '') +
+            '<button class="icon-btn" data-menu="' + esc(e.id) + '" type="button" aria-label="Actions" style="font-size:1.1rem;line-height:1;">\u2630</button>' +
           '</td>' +
           '</tr>';
       }).join("") + '</tbody></table>';
-    Array.prototype.forEach.call(wrap.querySelectorAll("[data-del]"), function (b) {
-      b.addEventListener("click", function () { removeEquipment(b.getAttribute("data-del"), b); });
+    Array.prototype.forEach.call(wrap.querySelectorAll("[data-menu]"), function (b) {
+      b.addEventListener("click", function (evt) {
+        evt.stopPropagation();
+        toggleRowMenu(b.getAttribute("data-menu"), b);
+      });
     });
-    Array.prototype.forEach.call(wrap.querySelectorAll("[data-dup]"), function (b) {
-      b.addEventListener("click", function () { duplicateEquipment(b.getAttribute("data-dup")); });
+  }
+
+  // ---------------------------------------------------------------
+  // Shared row-actions menu (burger button) — fixed-position so it's never
+  // clipped by the table's horizontal-scroll container.
+  // ---------------------------------------------------------------
+  var rowMenuOpenId = null;
+
+  function ensureRowMenuEl() {
+    var menu = byId("rowMenu");
+    if (menu) return menu;
+    menu = document.createElement("div");
+    menu.id = "rowMenu";
+    menu.className = "row-menu";
+    menu.style.display = "none";
+    menu.innerHTML =
+      '<button type="button" data-action="edit">Edit</button>' +
+      '<button type="button" data-action="duplicate">Duplicate</button>' +
+      '<button type="button" data-action="photo">Photo\u2026</button>' +
+      '<button type="button" data-action="markLost">Mark as lost</button>' +
+      '<button type="button" data-action="markFound">Mark as found (back in store)</button>' +
+      '<button type="button" data-action="remove">Remove</button>';
+    document.body.appendChild(menu);
+    menu.addEventListener("click", function (evt) {
+      var btn = evt.target.closest ? evt.target.closest("button[data-action]") : null;
+      if (!btn) return;
+      var id = rowMenuOpenId;
+      closeRowMenu();
+      if (!id) return;
+      var action = btn.getAttribute("data-action");
+      if (action === "edit") editEquipment(id);
+      else if (action === "duplicate") duplicateEquipment(id);
+      else if (action === "photo") openPhotoPickerFor(id);
+      else if (action === "markLost") setEquipmentLost(id, true);
+      else if (action === "markFound") setEquipmentLost(id, false);
+      else if (action === "remove") removeEquipment(id);
     });
-    Array.prototype.forEach.call(wrap.querySelectorAll("[data-edit]"), function (b) {
-      b.addEventListener("click", function () { editEquipment(b.getAttribute("data-edit")); });
-    });
+    document.addEventListener("click", function () { closeRowMenu(); });
+    document.addEventListener("keydown", function (evt) { if (evt.key === "Escape") closeRowMenu(); });
+    window.addEventListener("scroll", function () { closeRowMenu(); }, true);
+    window.addEventListener("resize", function () { closeRowMenu(); });
+    return menu;
+  }
+
+  function closeRowMenu() {
+    var menu = byId("rowMenu");
+    if (menu) menu.style.display = "none";
+    rowMenuOpenId = null;
+  }
+
+  function toggleRowMenu(id, btnEl) {
+    var menu = ensureRowMenuEl();
+    if (rowMenuOpenId === id) { closeRowMenu(); return; }
+    var eq = equipmentById(id);
+    var removeBtn = menu.querySelector('[data-action="remove"]');
+    if (removeBtn) removeBtn.style.display = (eq && eq.status === "in_store") ? "" : "none";
+    var lostBtn = menu.querySelector('[data-action="markLost"]');
+    var foundBtn = menu.querySelector('[data-action="markFound"]');
+    if (lostBtn) lostBtn.style.display = (eq && eq.status !== "lost") ? "" : "none";
+    if (foundBtn) foundBtn.style.display = (eq && eq.status === "lost") ? "" : "none";
+    rowMenuOpenId = id;
+    menu.style.display = "block";
+    var rect = btnEl.getBoundingClientRect();
+    var menuRect = menu.getBoundingClientRect();
+    var top = rect.bottom + 4;
+    var left = rect.right - menuRect.width;
+    if (left < 4) left = 4;
+    if (top + menuRect.height > window.innerHeight - 4) top = rect.top - menuRect.height - 4;
+    menu.style.top = top + "px";
+    menu.style.left = left + "px";
+  }
+
+  // Marking lost also closes out any open checkout so it stops looking "overdue" forever;
+  // marking found returns it straight to store.
+  async function setEquipmentLost(id, lost) {
+    if (!db) { toast("Not connected to shared storage.", true); return; }
+    var eq = equipmentById(id);
+    if (!eq) return;
+    if (lost && !window.confirm("Mark \u201C" + eq.type + "\u201D (" + eq.idTag + ") as lost / written off?")) return;
+    try {
+      if (lost) {
+        if (eq.status === "checked_out" && eq.currentCheckoutId) {
+          await checkoutsCol.doc(eq.currentCheckoutId).update({ status: "closed", lostResolution: true });
+        }
+        await equipmentCol.doc(id).update({ status: "lost", currentCheckoutId: null });
+        toast(eq.type + " marked as lost.");
+      } else {
+        await equipmentCol.doc(id).update({ status: "in_store", currentCheckoutId: null });
+        toast(eq.type + " marked as found and returned to store.");
+      }
+    } catch (e) {
+      console.error(e);
+      toast("Couldn\u2019t update that item.", true);
+    }
   }
 
   function editEquipment(id) {
@@ -1857,7 +2410,7 @@
     var eq = equipmentById(id);
     if (!eq) return;
     if (!window.confirm("Remove \u201C" + eq.type + "\u201D (" + eq.idTag + ") from the catalog?")) return;
-    btnEl.disabled = true;
+    if (btnEl) btnEl.disabled = true;
     try {
       var snap = await equipmentCol.doc(id).get();
       if (snap.exists && snap.data().status !== "in_store") {
@@ -1870,7 +2423,122 @@
       console.error(e);
       toast("Couldn\u2019t remove that item.", true);
     } finally {
-      btnEl.disabled = false;
+      if (btnEl) btnEl.disabled = false;
+    }
+  }
+
+  // ---------------------------------------------------------------
+  // Equipment photos — one photo per item, resized client-side before saving
+  // ---------------------------------------------------------------
+  var EQ_PHOTO_MAX_DIMENSION = 360;
+  var EQ_PHOTO_MAX_SOURCE_BYTES = 15 * 1024 * 1024;
+
+  function resizeImageFile(file, maxDim, quality, onDone, onError) {
+    var reader = new FileReader();
+    reader.onerror = function () { onError("Couldn\u2019t read that file."); };
+    reader.onload = function () {
+      var img = new Image();
+      img.onload = function () {
+        try {
+          var canvas = document.createElement("canvas");
+          var scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+          canvas.width = Math.max(1, Math.round(img.width * scale));
+          canvas.height = Math.max(1, Math.round(img.height * scale));
+          var ctx = canvas.getContext("2d");
+          ctx.fillStyle = "#ffffff";
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          onDone(canvas.toDataURL("image/jpeg", quality));
+        } catch (e) {
+          console.error(e);
+          onError("Couldn\u2019t process that image.");
+        }
+      };
+      img.onerror = function () { onError("Couldn\u2019t read that image."); };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function openPhotoPickerFor(id) {
+    var input = byId("eqPhotoFileInput");
+    if (!input) {
+      input = document.createElement("input");
+      input.type = "file";
+      input.id = "eqPhotoFileInput";
+      input.accept = "image/png,image/jpeg,image/jpg,image/webp,image/gif";
+      input.style.display = "none";
+      document.body.appendChild(input);
+    }
+    input.value = "";
+    input.onchange = function () {
+      if (!input.files || !input.files[0]) return;
+      var file = input.files[0];
+      if (!/^image\//.test(file.type)) { toast("That doesn\u2019t look like an image file.", true); return; }
+      if (file.size > EQ_PHOTO_MAX_SOURCE_BYTES) { toast("That file\u2019s a bit large \u2014 try something under 15MB.", true); return; }
+      resizeImageFile(file, EQ_PHOTO_MAX_DIMENSION, 0.8, function (dataUrl) {
+        saveEquipmentPhoto(id, dataUrl);
+      }, function (msg) { toast(msg, true); });
+    };
+    input.click();
+  }
+
+  async function saveEquipmentPhoto(id, dataUrl) {
+    if (!db) { toast("Not connected to shared storage.", true); return; }
+    if (dataUrl.length > 900000) { toast("That photo is still too large after resizing \u2014 try a different one.", true); return; }
+    try {
+      await equipmentCol.doc(id).update({ photoDataUrl: dataUrl });
+      toast("Photo updated.");
+    } catch (e) {
+      console.error(e);
+      toast("Couldn\u2019t save that photo.", true);
+    }
+  }
+
+  // ---------------------------------------------------------------
+  // Printable QR labels — one per equipment item, encoding its ID tag
+  // ---------------------------------------------------------------
+  async function printQrLabels() {
+    if (!window.QRCode) { toast("QR code library didn\u2019t load \u2014 check your internet connection and try again.", true); return; }
+    if (!state.equipment.length) { toast("Add some equipment first.", true); return; }
+    var btn = byId("printLabelsBtn");
+    if (btn) { btn.disabled = true; btn.textContent = "Generating…"; }
+    try {
+      var sorted = state.equipment.slice().sort(function (a, b) { return (a.type || "").localeCompare(b.type || ""); });
+      var labels = await Promise.all(sorted.map(function (e) {
+        return QRCode.toDataURL(e.idTag, { width: 160, margin: 1 }).then(function (url) {
+          return { type: e.type, idTag: e.idTag, url: url };
+        });
+      }));
+      var win = window.open("", "_blank");
+      if (!win) { toast("Your browser blocked the print window \u2014 allow pop-ups for this site and try again.", true); return; }
+      var body = labels.map(function (l) {
+        return '<div class="label">' +
+          '<img src="' + l.url + '" alt="">' +
+          '<div class="label-type">' + esc(l.type) + '</div>' +
+          '<div class="label-tag">' + esc(l.idTag) + '</div>' +
+          '</div>';
+      }).join("");
+      win.document.write(
+        '<!DOCTYPE html><html><head><title>Equipment QR labels</title><style>' +
+        'body{font-family:sans-serif;margin:16px;} ' +
+        '.sheet{display:flex;flex-wrap:wrap;gap:10px;} ' +
+        '.label{width:140px;border:1px solid #ccc;border-radius:4px;padding:8px;text-align:center;page-break-inside:avoid;} ' +
+        '.label img{width:100%;height:auto;} ' +
+        '.label-type{font-size:11px;margin-top:4px;} ' +
+        '.label-tag{font-family:monospace;font-weight:700;font-size:12px;margin-top:2px;} ' +
+        '@media print{.no-print{display:none;}}' +
+        '</style></head><body>' +
+        '<p class="no-print">Ready to print — use your browser\u2019s print dialog (Ctrl/Cmd+P). <button onclick="window.print()">Print now</button></p>' +
+        '<div class="sheet">' + body + '</div>' +
+        '</body></html>'
+      );
+      win.document.close();
+    } catch (e) {
+      console.error(e);
+      toast("Couldn\u2019t generate labels. Please try again.", true);
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = "Print QR labels"; }
     }
   }
 
@@ -2237,12 +2905,65 @@
   // ---------------------------------------------------------------
   var ACCESS_CODE = "160363";
   var UNLOCK_KEY = "pcfcKitStoreUnlocked";
+  var isPublicUrl = /[?&]public=1(&|$)/.test(window.location.search);
 
   function boot() {
     renderNav();
     renderMain();
     renderStatStrip();
     initDb();
+  }
+
+  // A read-only view with no PIN — just current availability, live-updating,
+  // no sidebar/tabs/write actions. Reached via ?public=1 on the URL.
+  function bootPublic() {
+    state.publicMode = true;
+    var sidebar = byId("sidebar");
+    var mobileTabs = byId("mobileTabs");
+    var statStrip = byId("statStrip");
+    if (sidebar) sidebar.style.display = "none";
+    if (mobileTabs) mobileTabs.style.display = "none";
+    if (statStrip) statStrip.style.display = "none";
+    var main = byId("main");
+    main.innerHTML =
+      '<h2>Equipment availability</h2>' +
+      '<p class="tab-desc">Read-only view — updates live. For check-outs, check-ins or admin, use the full app link.</p>' +
+      '<div class="grid-2">' +
+        '<div class="panel"><h3>In store</h3><div class="table-wrap" id="pubInStoreWrap"></div></div>' +
+        '<div class="panel"><h3>Checked out</h3><div class="table-wrap" id="pubCheckedOutWrap"></div></div>' +
+      '</div>';
+    initDb();
+  }
+
+  function renderPublicView() {
+    var inWrap = byId("pubInStoreWrap");
+    var outWrap = byId("pubCheckedOutWrap");
+    if (!inWrap || !outWrap) return;
+    var inStore = state.equipment.filter(function (e) { return e.status === "in_store"; })
+      .sort(function (a, b) { return (a.type || "").localeCompare(b.type || ""); });
+    if (!state.ready.equipment) {
+      inWrap.innerHTML = '<p class="tab-desc">Loading…</p>';
+    } else if (!inStore.length) {
+      inWrap.innerHTML = '<p class="tab-desc">Nothing in store right now.</p>';
+    } else {
+      inWrap.innerHTML = '<table><thead><tr><th>Type</th><th>Size</th><th>Colour</th></tr></thead><tbody>' +
+        inStore.map(function (e) { return '<tr><td>' + esc(e.type) + '</td><td>' + esc(e.size || "—") + '</td><td>' + esc(e.colour || "—") + '</td></tr>'; }).join("") +
+        '</tbody></table>';
+    }
+    var checkedOut = state.equipment.filter(function (e) { return e.status === "checked_out"; });
+    if (!state.ready.equipment || !state.ready.checkouts) {
+      outWrap.innerHTML = '<p class="tab-desc">Loading…</p>';
+    } else if (!checkedOut.length) {
+      outWrap.innerHTML = '<p class="tab-desc">Nothing checked out right now.</p>';
+    } else {
+      outWrap.innerHTML = '<table><thead><tr><th>Type</th><th>Held by</th><th>Due back</th></tr></thead><tbody>' +
+        checkedOut.map(function (e) {
+          var co = checkoutById(e.currentCheckoutId);
+          var overdue = co && isOverdue(co.dueDate);
+          return '<tr><td>' + esc(e.type) + '</td><td>' + (co ? esc(co.name) + " (" + esc(co.team) + ")" : "—") + '</td>' +
+            '<td>' + (co ? (overdue ? '<span class="status-chip overdue">Overdue</span>' : esc(fmtDate(co.dueDate))) : "—") + '</td></tr>';
+        }).join("") + '</tbody></table>';
+    }
   }
 
   function tryUnlock() {
@@ -2264,6 +2985,11 @@
   }
 
   function initLockScreen() {
+    if (isPublicUrl) {
+      byId("lockScreen").remove();
+      bootPublic();
+      return;
+    }
     var alreadyUnlocked = false;
     try { alreadyUnlocked = localStorage.getItem(UNLOCK_KEY) === "1"; } catch (e) {}
     if (alreadyUnlocked) {
