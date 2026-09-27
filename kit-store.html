@@ -877,7 +877,7 @@
     });
   }
 
-  var APP_VERSION = "v1.7";
+  var APP_VERSION = "v1.8";
 
   function renderNav() {
     var sidebar = byId("sidebar");
@@ -1235,9 +1235,13 @@
       var handoverCount = 0;
       var skipped = [];
       var cappedSkipped = [];
+      // Snapshot the selection now — the live picker can redraw mid-submit (our own writes
+      // trigger the real-time listener) and must never be allowed to mutate the list this
+      // loop is iterating over.
+      var idsToProcess = checkoutForm.equipmentIds.slice();
 
-      for (var i = 0; i < checkoutForm.equipmentIds.length; i++) {
-        var equipmentId = checkoutForm.equipmentIds[i];
+      for (var i = 0; i < idsToProcess.length; i++) {
+        var equipmentId = idsToProcess[i];
         var eqRef = equipmentCol.doc(equipmentId);
         var snap = await eqRef.get();
         if (!snap.exists) { skipped.push(equipmentId); continue; }
@@ -1448,9 +1452,10 @@
       var actionId = uid();
       var nowIso = new Date().toISOString();
       var checkedInNames = [];
+      var idsToProcess = checkinForm.equipmentIds.slice();
 
-      for (var i = 0; i < checkinForm.equipmentIds.length; i++) {
-        var equipmentId = checkinForm.equipmentIds[i];
+      for (var i = 0; i < idsToProcess.length; i++) {
+        var equipmentId = idsToProcess[i];
         var eqRef = equipmentCol.doc(equipmentId);
         var snap = await eqRef.get();
         if (!snap.exists || snap.data().status !== "checked_out" || !snap.data().currentCheckoutId) continue;
