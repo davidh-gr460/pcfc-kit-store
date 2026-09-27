@@ -348,6 +348,7 @@
     gap: 10px;
     padding: 10px 12px;
     border-bottom: 1px solid var(--border);
+    cursor: pointer;
   }
   .picker-item:last-child { border-bottom: none; }
   .picker-item.selected { background: var(--tag-green-bg); }
@@ -1108,24 +1109,35 @@
     list.innerHTML = html;
     bindPickerToggle(list, ".picker-item", function (id) {
       var idx = checkoutForm.equipmentIds.indexOf(id);
-      if (idx > -1) checkoutForm.equipmentIds.splice(idx, 1);
-      else checkoutForm.equipmentIds.push(id);
-      renderCheckoutPicker();
+      var nowSelected;
+      if (idx > -1) { checkoutForm.equipmentIds.splice(idx, 1); nowSelected = false; }
+      else { checkoutForm.equipmentIds.push(id); nowSelected = true; }
+      var countEl = byId("coSelCount");
+      if (countEl) countEl.textContent = checkoutForm.equipmentIds.length ? "(" + checkoutForm.equipmentIds.length + " selected)" : "";
+      return nowSelected;
     });
   }
 
   // Toggling a checkbox-in-a-row is easy to accidentally double-handle (the checkbox's own
   // native toggle plus a bubbled row click both firing). This binds each exactly once:
   // clicking the checkbox uses its "change" event; clicking anywhere else in the row uses "click".
+  // Deliberately does NOT rebuild the list on every tap — onToggle returns the new selected
+  // state and this updates just that one row's class/checkbox, so a fast multi-select tap
+  // sequence on mobile never has to hit a freshly-rebuilt element mid-gesture.
   function bindPickerToggle(container, itemSelector, onToggle) {
     Array.prototype.forEach.call(container.querySelectorAll(itemSelector), function (row) {
       var checkbox = row.querySelector('input[type="checkbox"]');
+      function handleToggle() {
+        var nowSelected = onToggle(row.getAttribute("data-id"));
+        row.classList.toggle("selected", !!nowSelected);
+        if (checkbox) checkbox.checked = !!nowSelected;
+      }
       row.addEventListener("click", function (evt) {
         if (checkbox && evt.target === checkbox) return;
-        onToggle(row.getAttribute("data-id"));
+        handleToggle();
       });
       if (checkbox) {
-        checkbox.addEventListener("change", function () { onToggle(row.getAttribute("data-id")); });
+        checkbox.addEventListener("change", handleToggle);
       }
     });
   }
@@ -1351,10 +1363,13 @@
     }).join("");
     bindPickerToggle(list, ".picker-item", function (id) {
       var idx = checkinForm.equipmentIds.indexOf(id);
-      if (idx > -1) checkinForm.equipmentIds.splice(idx, 1);
-      else checkinForm.equipmentIds.push(id);
-      renderCheckinPicker();
+      var nowSelected;
+      if (idx > -1) { checkinForm.equipmentIds.splice(idx, 1); nowSelected = false; }
+      else { checkinForm.equipmentIds.push(id); nowSelected = true; }
+      var countEl = byId("ciSelCount");
+      if (countEl) countEl.textContent = checkinForm.equipmentIds.length ? "(" + checkinForm.equipmentIds.length + " selected)" : "";
       renderCheckinDetails();
+      return nowSelected;
     });
     renderCheckinDetails();
   }
