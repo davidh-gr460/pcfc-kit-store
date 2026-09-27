@@ -183,6 +183,14 @@
     font-size: 0.72rem;
     opacity: 0.85;
   }
+  .sidebar-version {
+    margin-top: auto;
+    padding: 10px 12px 4px;
+    font-size: 0.68rem;
+    color: var(--sidebar-text-dim);
+    opacity: 0.6;
+    letter-spacing: 0.02em;
+  }
 
   main {
     flex: 1;
@@ -869,12 +877,14 @@
     });
   }
 
+  var APP_VERSION = "v1.7";
+
   function renderNav() {
     var sidebar = byId("sidebar");
     sidebar.innerHTML = TABS.map(function (t) {
       return '<button id="nav_' + t.id + '" data-tab="' + t.id + '" class="' + (state.activeTab === t.id ? "active" : "") + '">' +
         esc(t.label) + '<span class="count"></span></button>';
-    }).join("");
+    }).join("") + '<div class="sidebar-version">' + esc(APP_VERSION) + '</div>';
     Array.prototype.forEach.call(sidebar.querySelectorAll("button"), function (b) {
       b.addEventListener("click", function () { switchTab(b.getAttribute("data-tab")); });
     });
