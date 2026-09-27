@@ -364,6 +364,20 @@
   .picker-item .info .t { font-weight: 600; font-size: 0.9rem; }
   .picker-item .info .m { font-size: 0.78rem; color: var(--text-soft); }
   .picker-empty { padding: 20px 12px; color: var(--text-soft); font-style: italic; font-size: 0.88rem; }
+  .bundle-group { border-bottom: 1px solid var(--border); }
+  .bundle-group:last-child { border-bottom: none; }
+  .bundle-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    background: var(--chalk-200);
+    cursor: pointer;
+  }
+  .bundle-header .info .t { font-weight: 700; font-size: 0.88rem; }
+  .bundle-header .info .m { font-size: 0.74rem; color: var(--text-soft); margin-top: 2px; }
+  .bundle-items .picker-item.bundle-item { padding-left: 34px; border-bottom: 1px solid var(--border); }
+  .bundle-items .picker-item.bundle-item:last-child { border-bottom: none; }
   .picker-section-label {
     padding: 7px 12px;
     font-size: 0.72rem;
@@ -877,7 +891,7 @@
     });
   }
 
-  var APP_VERSION = "v1.8";
+  var APP_VERSION = "v1.9";
 
   function renderNav() {
     var sidebar = byId("sidebar");
@@ -1364,29 +1378,122 @@
       renderCheckinDetails();
       return;
     }
-    list.innerHTML = items.map(function (e) {
-      var sel = checkinForm.equipmentIds.indexOf(e.id) > -1;
+
+    // Group items by the checkout action that brought them out together, so a bundle
+    // check-out shows as one header (borrower/team/location/dates) with its items nested
+    // underneath, instead of repeating the same borrower details on every row.
+    var groups = [];
+    var groupByKey = {};
+    items.forEach(function (e) {
       var co = checkoutById(e.currentCheckoutId);
-      var mates = bundleMates(e.id).length;
+      var key = co ? (co.actionId || co.id) : ("_" + e.id);
+      if (!groupByKey[key]) {
+        groupByKey[key] = { key: key, checkout: co, items: [] };
+        groups.push(groupByKey[key]);
+      }
+      groupByKey[key].items.push(e);
+    });
+    groups.sort(function (a, b) {
+      var at = a.checkout ? a.checkout.checkOutTime || "" : "";
+      var bt = b.checkout ? b.checkout.checkOutTime || "" : "";
+      return bt.localeCompare(at);
+    });
+
+    function itemRowHtml(e) {
+      var sel = checkinForm.equipmentIds.indexOf(e.id) > -1;
       var noteBadge = e.description ? ' <span title="' + esc(e.description) + '" style="cursor:help;">\u26A0\uFE0F</span>' : '';
-      return '<div class="picker-item' + (sel ? ' selected' : '') + '" data-id="' + esc(e.id) + '">' +
-        '<input type="checkbox" style="width:auto;flex-shrink:0;" ' + (sel ? "checked" : "") + ' data-id="' + esc(e.id) + '">' +
-        '<div class="info"><div class="t">' + esc(e.type) + noteBadge + '</div><div class="m">' + (co ? "with " + esc(co.name) + " (" + esc(co.team) + ") at " + esc(co.location) : "") + (mates ? " · +" + mates + " more in this bundle" : "") + '</div></div>' +
+      var sub = [e.size, e.colour].filter(Boolean).join(" · ");
+      return '<div class="picker-item bundle-item' + (sel ? ' selected' : '') + '" data-id="' + esc(e.id) + '">' +
+        '<input type="checkbox" style="width:auto;flex-shrink:0;" ' + (sel ? "checked" : "") + '>' +
+        '<div class="info"><div class="t">' + esc(e.type) + noteBadge + '</div><div class="m">' + esc(sub) + '</div></div>' +
         '<span class="tag-chip">' + esc(e.idTag) + '</span>' +
         '</div>';
+    }
+
+    list.innerHTML = groups.map(function (g) {
+      var co = g.checkout;
+      var overdue = co && isOverdue(co.dueDate);
+      var allSelected = g.items.every(function (e) { return checkinForm.equipmentIds.indexOf(e.id) > -1; });
+      var someSelected = g.items.some(function (e) { return checkinForm.equipmentIds.indexOf(e.id) > -1; });
+      var headerMeta = co
+        ? esc(co.location) + ' · out ' + esc(fmtDateTime(co.checkOutTime)) + ' · by ' + esc(co.checkedOutBy) +
+          (overdue ? ' · <strong style="color:var(--tag-red);">overdue, was due ' + esc(fmtDate(co.dueDate)) + '</strong>' : ' · due ' + esc(fmtDate(co.dueDate)))
+        : "";
+      return '<div class="bundle-group" data-group="' + esc(g.key) + '">' +
+        '<div class="bundle-header">' +
+          '<input type="checkbox" class="bundle-select-all" style="width:auto;flex-shrink:0;" ' + (allSelected ? "checked" : "") + '>' +
+          '<div class="info">' +
+            '<div class="t">' + (co ? esc(co.name) + " (" + esc(co.team) + ")" : "Unknown borrower") + (g.items.length > 1 ? ' <span class="tag-chip">' + g.items.length + ' items</span>' : '') + '</div>' +
+            '<div class="m">' + headerMeta + '</div>' +
+          '</div>' +
+        '</div>' +
+        '<div class="bundle-items">' + g.items.map(itemRowHtml).join("") + '</div>' +
+      '</div>';
     }).join("");
-    bindPickerToggle(list, ".picker-item", function (id) {
+
+    // Per-item toggling within a bundle
+    bindPickerToggle(list, ".bundle-item", function (id) {
       var idx = checkinForm.equipmentIds.indexOf(id);
       var nowSelected;
       if (idx > -1) { checkinForm.equipmentIds.splice(idx, 1); nowSelected = false; }
       else { checkinForm.equipmentIds.push(id); nowSelected = true; }
-      var countEl = byId("ciSelCount");
-      if (countEl) countEl.textContent = checkinForm.equipmentIds.length ? "(" + checkinForm.equipmentIds.length + " selected)" : "";
+      refreshCheckinSelectionUI();
       renderCheckinDetails();
       return nowSelected;
     });
+
+    // Whole-bundle toggling via the header checkbox
+    Array.prototype.forEach.call(list.querySelectorAll(".bundle-group"), function (groupEl) {
+      var key = groupEl.getAttribute("data-group");
+      var group = groupByKey[key];
+      var headerCheckbox = groupEl.querySelector(".bundle-select-all");
+      function toggleWholeBundle() {
+        var allNowSelected = group.items.every(function (e) { return checkinForm.equipmentIds.indexOf(e.id) > -1; });
+        var makeSelected = !allNowSelected;
+        group.items.forEach(function (e) {
+          var idx = checkinForm.equipmentIds.indexOf(e.id);
+          if (makeSelected && idx === -1) checkinForm.equipmentIds.push(e.id);
+          if (!makeSelected && idx > -1) checkinForm.equipmentIds.splice(idx, 1);
+        });
+        refreshCheckinSelectionUI();
+        renderCheckinDetails();
+      }
+      groupEl.querySelector(".bundle-header").addEventListener("click", function (evt) {
+        if (evt.target === headerCheckbox) return;
+        toggleWholeBundle();
+      });
+      headerCheckbox.addEventListener("change", toggleWholeBundle);
+    });
+
     renderCheckinDetails();
   }
+
+  // After any selection change, sync every row's checkbox/selected class and each bundle
+  // header's checked/indeterminate state, without rebuilding the list.
+  function refreshCheckinSelectionUI() {
+    var list = byId("ciEquipmentList");
+    if (!list) return;
+    var countEl = byId("ciSelCount");
+    if (countEl) countEl.textContent = checkinForm.equipmentIds.length ? "(" + checkinForm.equipmentIds.length + " selected)" : "";
+    Array.prototype.forEach.call(list.querySelectorAll(".bundle-group"), function (groupEl) {
+      var itemEls = groupEl.querySelectorAll(".bundle-item");
+      var selectedCount = 0;
+      Array.prototype.forEach.call(itemEls, function (row) {
+        var id = row.getAttribute("data-id");
+        var sel = checkinForm.equipmentIds.indexOf(id) > -1;
+        row.classList.toggle("selected", sel);
+        var cb = row.querySelector('input[type="checkbox"]');
+        if (cb) cb.checked = sel;
+        if (sel) selectedCount++;
+      });
+      var headerCheckbox = groupEl.querySelector(".bundle-select-all");
+      if (headerCheckbox) {
+        headerCheckbox.checked = selectedCount === itemEls.length;
+        headerCheckbox.indeterminate = selectedCount > 0 && selectedCount < itemEls.length;
+      }
+    });
+  }
+
 
   function renderCheckinDetails() {
     var wrap = byId("ciDetails");
