@@ -449,6 +449,52 @@
   }
   #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
   #toast.err { background: var(--tag-red); }
+  .toast-undo {
+    background: rgba(255,255,255,0.18);
+    border: 1px solid rgba(255,255,255,0.4);
+    color: #fff;
+    font-size: 0.78rem;
+    font-weight: 600;
+    padding: 3px 10px;
+    border-radius: 999px;
+    margin-left: 10px;
+    flex-shrink: 0;
+  }
+  .toast-undo:hover { background: rgba(255,255,255,0.3); }
+  .toast-undo:disabled { opacity: 0.6; }
+  #toast { display: flex; align-items: center; }
+  .link-btn {
+    background: none;
+    border: none;
+    color: var(--pitch-600);
+    font-size: inherit;
+    text-decoration: underline;
+    padding: 0;
+    cursor: pointer;
+  }
+  .offline-banner {
+    position: sticky;
+    top: 0;
+    z-index: 90;
+    background: var(--tag-red);
+    color: #fff;
+    text-align: center;
+    font-size: 0.82rem;
+    padding: 7px 12px;
+    padding-top: calc(7px + env(safe-area-inset-top, 0px));
+  }
+  .bulk-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: var(--tag-green-bg);
+    border: 1px solid var(--pitch-600);
+    border-radius: var(--radius);
+    padding: 8px 12px;
+    margin-bottom: 10px;
+    font-size: 0.85rem;
+    flex-wrap: wrap;
+  }
 
   .conn-block {
     position: fixed;
@@ -604,6 +650,7 @@
 </head>
 <body>
 
+<div id="offlineBanner" class="offline-banner" style="display:none;">You’re offline — changes won’t save until you reconnect.</div>
 <div id="app">
   <div class="topbar">
     <div class="club">
@@ -638,6 +685,9 @@
     <div id="scanStatus">Point the camera at a QR label…</div>
     <button class="btn secondary" id="scanClose" type="button">Close scanner</button>
   </div>
+</div>
+<div class="scan-modal" id="sigViewModal" style="display:none;">
+  <div class="scan-box" id="sigViewBox"></div>
 </div>
 <div class="lock-screen" id="lockScreen">
   <div class="lock-box" id="lockBox">
@@ -804,14 +854,43 @@
     if (!dueDate) return false;
     return dueDate < todayISODate();
   }
-  function toast(msg, isErr) {
+  function toast(msg, isErr, undoFn) {
     var el = document.getElementById("toast");
-    el.textContent = msg;
+    el.innerHTML = "";
+    el.appendChild(document.createTextNode(msg));
+    if (undoFn) {
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "toast-undo";
+      btn.textContent = "Undo";
+      btn.addEventListener("click", function (evt) {
+        evt.stopPropagation();
+        el.className = "";
+        clearTimeout(toast._t);
+        btn.disabled = true;
+        btn.textContent = "Undoing…";
+        Promise.resolve(undoFn()).catch(function (e) { console.error(e); });
+      });
+      el.appendChild(btn);
+    }
     el.className = isErr ? "show err" : "show";
     clearTimeout(toast._t);
-    toast._t = setTimeout(function () { el.className = ""; }, 3200);
+    toast._t = setTimeout(function () { el.className = ""; }, undoFn ? 7000 : 3200);
   }
   function byId(id) { return document.getElementById(id); }
+
+  // ---------------------------------------------------------------
+  // Offline awareness — browser connectivity is a reasonable proxy for
+  // whether writes will actually reach Firestore.
+  // ---------------------------------------------------------------
+  function updateOfflineBanner() {
+    var banner = byId("offlineBanner");
+    if (!banner) return;
+    banner.style.display = (navigator.onLine === false) ? "" : "none";
+  }
+  window.addEventListener("online", function () { updateOfflineBanner(); toast("Back online."); });
+  window.addEventListener("offline", updateOfflineBanner);
+  updateOfflineBanner();
 
   function equipmentById(id) {
     for (var i = 0; i < state.equipment.length; i++) if (state.equipment[i].id === id) return state.equipment[i];
@@ -978,7 +1057,7 @@
     });
   }
 
-  var APP_VERSION = "v3.4";
+  var APP_VERSION = "v4.0";
   (function () { var el = byId("topbarVersion"); if (el) el.textContent = APP_VERSION; })();
 
   function renderNav() {
@@ -1515,6 +1594,7 @@
       // trigger the real-time listener) and must never be allowed to mutate the list this
       // loop is iterating over.
       var idsToProcess = checkoutForm.equipmentIds.slice();
+      var undoOps = [];
 
       for (var i = 0; i < idsToProcess.length; i++) {
         var equipmentId = idsToProcess[i];
@@ -1537,6 +1617,7 @@
             actionId: actionId, cascadeDepth: 0, precedingCheckoutId: null
           });
           freshCount++;
+          undoOps.push({ type: "fresh", equipmentId: equipmentId, newCheckoutId: checkoutRef.id });
         } else if (eqData.status === "checked_out" && eqData.currentCheckoutId) {
           // hand-over from whoever currently has it — closes their check-out and opens a new one
           var oldCheckoutId = eqData.currentCheckoutId;
@@ -1563,6 +1644,7 @@
           await checkoutsCol.doc(oldCheckoutId).update({ status: "closed", checkinId: checkinRef.id });
           await eqRef.update({ currentCheckoutId: checkoutRef.id }); // status stays "checked_out"
           handoverCount++;
+          undoOps.push({ type: "handover", equipmentId: equipmentId, newCheckoutId: checkoutRef.id, newCheckinId: checkinRef.id, oldCheckoutId: oldCheckoutId });
         } else {
           skipped.push(equipmentId);
         }
@@ -1582,7 +1664,7 @@
       var hadIssues = skipped.length || cappedSkipped.length;
       if (skipped.length) msg += " " + skipped.length + " item(s) were no longer available.";
       if (cappedSkipped.length) msg += " " + cappedSkipped.length + " item(s) hit the " + MAX_CASCADE_DEPTH + "-hand-over limit — check them in to store first.";
-      toast(msg, !!hadIssues);
+      toast(msg, !!hadIssues, function () { return undoCheckout(undoOps); });
       saveBorrowerSuggestions(name, team, location);
       renderCheckoutTab(byId("main"));
     } catch (e) {
@@ -1590,6 +1672,27 @@
       showBanner("coBanner", "Something went wrong saving the check-out. Please try again.");
     } finally {
       btn.disabled = false;
+    }
+  }
+
+  async function undoCheckout(undoOps) {
+    try {
+      for (var i = 0; i < undoOps.length; i++) {
+        var op = undoOps[i];
+        if (op.type === "fresh") {
+          await equipmentCol.doc(op.equipmentId).update({ status: "in_store", currentCheckoutId: null });
+          await checkoutsCol.doc(op.newCheckoutId).delete();
+        } else if (op.type === "handover") {
+          await equipmentCol.doc(op.equipmentId).update({ currentCheckoutId: op.oldCheckoutId });
+          await checkoutsCol.doc(op.oldCheckoutId).update({ status: "open", checkinId: null });
+          await checkinsCol.doc(op.newCheckinId).delete();
+          await checkoutsCol.doc(op.newCheckoutId).delete();
+        }
+      }
+      toast("Check-out undone.");
+    } catch (e) {
+      console.error(e);
+      toast("Couldn\u2019t fully undo that \u2014 check the Dashboard.", true);
     }
   }
 
@@ -1833,6 +1936,7 @@
       var nowIso = new Date().toISOString();
       var checkedInNames = [];
       var idsToProcess = checkinForm.equipmentIds.slice();
+      var undoOps = [];
 
       for (var i = 0; i < idsToProcess.length; i++) {
         var equipmentId = idsToProcess[i];
@@ -1859,6 +1963,7 @@
         await checkoutsCol.doc(oldCheckoutId).update({ status: "closed", checkinId: checkinRef.id });
         await eqRef.update({ status: "in_store", currentCheckoutId: null });
         checkedInNames.push(eqData.type + " (" + eqData.idTag + ")");
+        undoOps.push({ equipmentId: equipmentId, checkoutId: oldCheckoutId, checkinId: checkinRef.id });
       }
 
       if (!checkedInNames.length) {
@@ -1868,13 +1973,28 @@
         return;
       }
 
-      toast((checkedInNames.length > 1 ? checkedInNames.length + " items" : checkedInNames[0]) + " checked in.");
+      toast((checkedInNames.length > 1 ? checkedInNames.length + " items" : checkedInNames[0]) + " checked in.", false, function () { return undoCheckin(undoOps); });
       renderCheckinTab(byId("main"));
     } catch (e) {
       console.error(e);
       showBanner("ciBanner", "Something went wrong saving the check-in. Please try again.");
     } finally {
       btn.disabled = false;
+    }
+  }
+
+  async function undoCheckin(undoOps) {
+    try {
+      for (var i = 0; i < undoOps.length; i++) {
+        var op = undoOps[i];
+        await equipmentCol.doc(op.equipmentId).update({ status: "checked_out", currentCheckoutId: op.checkoutId });
+        await checkoutsCol.doc(op.checkoutId).update({ status: "open", checkinId: null });
+        await checkinsCol.doc(op.checkinId).delete();
+      }
+      toast("Check-in undone.");
+    } catch (e) {
+      console.error(e);
+      toast("Couldn\u2019t fully undo that \u2014 check the Dashboard.", true);
     }
   }
 
@@ -1965,7 +2085,8 @@
         var co = hop.checkout, ci = hop.checkin;
         var overdue = !ci && isOverdue(co.dueDate);
         var line1 = '<strong>' + esc(co.name) + '</strong> (' + esc(co.team) + ') at ' + esc(co.location);
-        var line2 = 'Out ' + esc(fmtDateTime(co.checkOutTime)) + ' by ' + esc(co.checkedOutBy) + ' — due ' + esc(fmtDate(co.dueDate));
+        var line2 = 'Out ' + esc(fmtDateTime(co.checkOutTime)) + ' by ' + esc(co.checkedOutBy) + ' — due ' + esc(fmtDate(co.dueDate)) +
+          (co.signature ? ' · <button class="link-btn" data-sig="' + esc(co.id) + '" type="button">View signature</button>' : '');
         var line3;
         if (!ci) {
           line3 = overdue ? '<span style="color:var(--tag-red);font-weight:600;">Still out — overdue</span>' : '<span style="color:var(--text-soft);">Still out</span>';
@@ -1989,6 +2110,27 @@
         '<div class="chain-timeline">' + hopRows + '</div>' +
       '</div>';
     }).join("");
+
+    Array.prototype.forEach.call(wrap.querySelectorAll("[data-sig]"), function (b) {
+      b.addEventListener("click", function () { openSignatureViewer(b.getAttribute("data-sig")); });
+    });
+  }
+
+  function openSignatureViewer(checkoutId) {
+    var co = checkoutById(checkoutId);
+    if (!co || !co.signature) return;
+    var box = byId("sigViewBox");
+    box.innerHTML =
+      '<h2 style="margin-top:0;">Signature</h2>' +
+      '<p class="tab-desc" style="margin-bottom:10px;">' + esc(co.name) + ' (' + esc(co.team) + ') \u2014 ' + esc(fmtDateTime(co.checkOutTime)) + ', checked out by ' + esc(co.checkedOutBy) + '</p>' +
+      '<img src="' + co.signature.replace(/"/g, "&quot;") + '" alt="Signature" style="width:100%;border:1px solid var(--border);border-radius:var(--radius);background:#fff;">' +
+      '<button class="btn secondary" id="sigViewClose" type="button" style="margin-top:14px;">Close</button>';
+    byId("sigViewModal").style.display = "flex";
+    byId("sigViewClose").addEventListener("click", closeSignatureViewer);
+  }
+  function closeSignatureViewer() {
+    var modal = byId("sigViewModal");
+    if (modal) modal.style.display = "none";
   }
 
   // =================================================================
@@ -2087,7 +2229,10 @@
         '<button class="btn" id="bulkImportBtn" type="button">Import rows</button>' +
         '<button class="btn secondary" id="bulkTemplateBtn" type="button" style="margin-left:8px;">Download template</button>' +
       '</div>' +
-      '<div class="panel"><h3>All items <button class="icon-btn small" id="exportCatalog" type="button" style="font-weight:400;">Export CSV</button> <button class="icon-btn small" id="printLabelsBtn" type="button" style="font-weight:400;">Print QR labels</button></h3><div class="table-wrap" id="eqTableWrap"></div></div>';
+      '<div class="panel"><h3>All items <button class="icon-btn small" id="exportCatalog" type="button" style="font-weight:400;">Export CSV</button> <button class="icon-btn small" id="printLabelsBtn" type="button" style="font-weight:400;">Print QR labels</button></h3>' +
+        '<div class="field" style="margin-bottom:10px;"><input type="text" id="eqTableSearch" placeholder="Search by type or ID tag…"></div>' +
+        '<div id="eqBulkBar" class="bulk-bar" style="display:none;"></div>' +
+        '<div class="table-wrap" id="eqTableWrap"></div></div>';
     byId("eqAdd").addEventListener("click", saveEquipment);
     byId("eqCancelEdit").addEventListener("click", function () { exitEquipmentEditMode(); });
     byId("bulkImportBtn").addEventListener("click", runBulkImport);
@@ -2100,6 +2245,8 @@
         state.equipment.map(function (e) { return [e.type, e.quantity, e.size, e.colour, e.idTag, e.description, e.status]; }));
     });
     byId("printLabelsBtn").addEventListener("click", printQrLabels);
+    equipmentBulkSelected = [];
+    byId("eqTableSearch").addEventListener("input", renderEquipmentTable);
     renderEquipmentTable();
   }
 
@@ -2243,14 +2390,34 @@
     }
   }
 
+  var equipmentBulkSelected = [];
+
   function renderEquipmentTable() {
     var wrap = byId("eqTableWrap");
     if (!wrap) return;
     if (!state.ready.equipment) { wrap.innerHTML = '<p class="tab-desc">Loading…</p>'; return; }
     if (!state.equipment.length) { wrap.innerHTML = '<p class="tab-desc">No equipment in the catalog yet — add your first item above.</p>'; return; }
-    var sorted = state.equipment.slice().sort(function (a, b) { return (a.type || "").localeCompare(b.type || ""); });
+
+    var q = (byId("eqTableSearch") && byId("eqTableSearch").value || "").toLowerCase().trim();
+    var validIds = {};
+    state.equipment.forEach(function (e) { validIds[e.id] = true; });
+    equipmentBulkSelected = equipmentBulkSelected.filter(function (id) { return validIds[id]; });
+
+    var filtered = state.equipment.filter(function (e) {
+      if (!q) return true;
+      return (e.type || "").toLowerCase().indexOf(q) > -1 || (e.idTag || "").toLowerCase().indexOf(q) > -1;
+    });
+    var sorted = filtered.slice().sort(function (a, b) { return (a.type || "").localeCompare(b.type || ""); });
+
+    renderEquipmentBulkBar();
+
+    if (!sorted.length) {
+      wrap.innerHTML = '<p class="tab-desc">No matching equipment.</p>';
+      return;
+    }
+
     wrap.innerHTML =
-      '<table><thead><tr><th></th><th>Type</th><th>Size</th><th>Colour</th><th>Qty</th><th>ID tag</th><th>Notes</th><th>Status</th><th></th></tr></thead><tbody>' +
+      '<table><thead><tr><th></th><th></th><th>Type</th><th>Size</th><th>Colour</th><th>Qty</th><th>ID tag</th><th>Notes</th><th>Status</th><th></th></tr></thead><tbody>' +
       sorted.map(function (e) {
         var statusChip =
           e.status === "in_store" ? '<span class="status-chip in-store">In store</span>' :
@@ -2260,7 +2427,9 @@
           ? '<span title="' + esc(e.description) + '" style="cursor:help;color:var(--tag-amber);">\u26A0\uFE0F ' + esc(e.description.length > 28 ? e.description.slice(0, 28) + "…" : e.description) + '</span>'
           : '<span style="color:var(--text-soft);">—</span>';
         var thumb = e.photoDataUrl ? '<img src="' + e.photoDataUrl.replace(/"/g, "&quot;") + '" class="eq-thumb" alt="">' : '<div class="eq-thumb eq-thumb-empty">\u26BD</div>';
+        var checked = equipmentBulkSelected.indexOf(e.id) > -1;
         return '<tr' + (e.id === equipmentEditingId ? ' style="background:var(--tag-green-bg);"' : '') + '>' +
+          '<td><input type="checkbox" data-bulk="' + esc(e.id) + '" ' + (checked ? "checked" : "") + '></td>' +
           '<td>' + thumb + '</td>' +
           '<td>' + esc(e.type) + '</td><td>' + esc(e.size || "—") + '</td><td>' + esc(e.colour || "—") + '</td><td>' + esc(e.quantity != null ? e.quantity : "—") + '</td>' +
           '<td><span class="tag-chip">' + esc(e.idTag) + '</span></td>' +
@@ -2277,6 +2446,102 @@
         toggleRowMenu(b.getAttribute("data-menu"), b);
       });
     });
+    Array.prototype.forEach.call(wrap.querySelectorAll("[data-bulk]"), function (cb) {
+      cb.addEventListener("change", function () {
+        var id = cb.getAttribute("data-bulk");
+        var idx = equipmentBulkSelected.indexOf(id);
+        if (cb.checked && idx === -1) equipmentBulkSelected.push(id);
+        if (!cb.checked && idx > -1) equipmentBulkSelected.splice(idx, 1);
+        renderEquipmentBulkBar();
+      });
+    });
+  }
+
+  function renderEquipmentBulkBar() {
+    var bar = byId("eqBulkBar");
+    if (!bar) return;
+    if (!equipmentBulkSelected.length) { bar.style.display = "none"; bar.innerHTML = ""; return; }
+    bar.style.display = "flex";
+    bar.innerHTML =
+      '<span>' + equipmentBulkSelected.length + ' selected</span>' +
+      '<button class="btn secondary small" id="bulkMarkLost" type="button">Mark as lost</button>' +
+      '<button class="btn danger small" id="bulkRemove" type="button">Remove</button>' +
+      '<button class="btn secondary small" id="bulkClearSel" type="button">Clear selection</button>';
+    byId("bulkMarkLost").addEventListener("click", bulkMarkLost);
+    byId("bulkRemove").addEventListener("click", bulkRemoveEquipment);
+    byId("bulkClearSel").addEventListener("click", function () { equipmentBulkSelected = []; renderEquipmentTable(); });
+  }
+
+  async function bulkMarkLost() {
+    if (!db) { toast("Not connected to shared storage.", true); return; }
+    var ids = equipmentBulkSelected.slice();
+    var eligible = ids.map(function (id) { return equipmentById(id); }).filter(function (e) { return e && e.status !== "lost"; });
+    if (!eligible.length) { toast("Nothing selected is eligible to mark as lost.", true); return; }
+    if (!window.confirm("Mark " + eligible.length + " item(s) as lost / written off?")) return;
+    try {
+      var prevState = eligible.map(function (e) { return { id: e.id, status: e.status, currentCheckoutId: e.currentCheckoutId }; });
+      var checkoutsClosed = [];
+      for (var i = 0; i < eligible.length; i++) {
+        var e = eligible[i];
+        if (e.status === "checked_out" && e.currentCheckoutId) {
+          await checkoutsCol.doc(e.currentCheckoutId).update({ status: "closed", lostResolution: true });
+          checkoutsClosed.push(e.currentCheckoutId);
+        }
+      }
+      var batch = db.batch();
+      eligible.forEach(function (e) { batch.update(equipmentCol.doc(e.id), { status: "lost", currentCheckoutId: null }); });
+      await batch.commit();
+      equipmentBulkSelected = [];
+      renderEquipmentTable();
+      toast(eligible.length + " item(s) marked as lost.", false, async function () {
+        try {
+          var undoBatch = db.batch();
+          prevState.forEach(function (p) { undoBatch.update(equipmentCol.doc(p.id), { status: p.status, currentCheckoutId: p.currentCheckoutId }); });
+          await undoBatch.commit();
+          for (var j = 0; j < checkoutsClosed.length; j++) {
+            await checkoutsCol.doc(checkoutsClosed[j]).update({ status: "open", lostResolution: false });
+          }
+          toast("Undone.");
+        } catch (e2) { console.error(e2); toast("Couldn\u2019t undo that.", true); }
+      });
+    } catch (e) {
+      console.error(e);
+      toast("Something went wrong. Please try again.", true);
+    }
+  }
+
+  async function bulkRemoveEquipment() {
+    if (!db) { toast("Not connected to shared storage.", true); return; }
+    var ids = equipmentBulkSelected.slice();
+    var eligible = ids.map(function (id) { return equipmentById(id); }).filter(function (e) { return e && e.status === "in_store"; });
+    var skipped = ids.length - eligible.length;
+    if (!eligible.length) { toast("Nothing selected can be removed \u2014 items must be in store first.", true); return; }
+    if (!window.confirm("Remove " + eligible.length + " item(s) from the catalog?" + (skipped ? " (" + skipped + " skipped \u2014 not in store)" : "") + " This can\u2019t be undone from here without re-adding them.")) return;
+    try {
+      var removedData = eligible.map(function (e) {
+        return { id: e.id, type: e.type, quantity: e.quantity, size: e.size, colour: e.colour, idTag: e.idTag, description: e.description, photoDataUrl: e.photoDataUrl || null, createdAt: e.createdAt };
+      });
+      var batch = db.batch();
+      eligible.forEach(function (e) { batch.delete(equipmentCol.doc(e.id)); });
+      await batch.commit();
+      equipmentBulkSelected = [];
+      renderEquipmentTable();
+      toast(eligible.length + " item(s) removed." + (skipped ? " " + skipped + " skipped (not in store)." : ""), false, async function () {
+        try {
+          var undoBatch = db.batch();
+          removedData.forEach(function (r) {
+            var data = { type: r.type, quantity: r.quantity, size: r.size, colour: r.colour, idTag: r.idTag, description: r.description, status: "in_store", currentCheckoutId: null, createdAt: r.createdAt };
+            if (r.photoDataUrl) data.photoDataUrl = r.photoDataUrl;
+            undoBatch.set(equipmentCol.doc(r.id), data);
+          });
+          await undoBatch.commit();
+          toast("Undone \u2014 items restored.");
+        } catch (e2) { console.error(e2); toast("Couldn\u2019t undo that.", true); }
+      });
+    } catch (e) {
+      console.error(e);
+      toast("Something went wrong. Please try again.", true);
+    }
   }
 
   // ---------------------------------------------------------------
