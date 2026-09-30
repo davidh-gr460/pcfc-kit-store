@@ -137,6 +137,9 @@
     align-items: center;
     gap: 10px;
   }
+  .club-logo-col { display: flex; flex-direction: column; align-items: center; gap: 2px; flex-shrink: 0; }
+  .club-title { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .topbar-version { font-size: 0.62rem; color: var(--sidebar-text-dim); opacity: 0.7; letter-spacing: 0.02em; }
   #clubLogo { height: 32px; width: auto; max-width: 60px; object-fit: contain; border-radius: 3px; flex-shrink: 0; }
   .topbar h1 {
     margin: 0;
@@ -191,14 +194,6 @@
     margin-left: auto;
     font-size: 0.72rem;
     opacity: 0.85;
-  }
-  .sidebar-version {
-    margin-top: auto;
-    padding: 10px 12px 4px;
-    font-size: 0.68rem;
-    color: var(--sidebar-text-dim);
-    opacity: 0.6;
-    letter-spacing: 0.02em;
   }
 
   main {
@@ -612,9 +607,14 @@
 <div id="app">
   <div class="topbar">
     <div class="club">
-      <img id="clubLogo" alt="Club badge" style="display:none;">
-      <h1>PCFC Kit Store</h1>
-      <span class="sub">Equipment check-out register</span>
+      <div class="club-logo-col">
+        <img id="clubLogo" alt="Club badge" style="display:none;">
+        <span class="topbar-version" id="topbarVersion"></span>
+      </div>
+      <div class="club-title">
+        <h1>PCFC Kit Store</h1>
+        <span class="sub">Equipment check-out register</span>
+      </div>
     </div>
     <div class="stat-strip" id="statStrip"></div>
   </div>
@@ -978,14 +978,15 @@
     });
   }
 
-  var APP_VERSION = "v3.2";
+  var APP_VERSION = "v3.4";
+  (function () { var el = byId("topbarVersion"); if (el) el.textContent = APP_VERSION; })();
 
   function renderNav() {
     var sidebar = byId("sidebar");
     sidebar.innerHTML = TABS.map(function (t) {
       return '<button id="nav_' + t.id + '" data-tab="' + t.id + '" class="' + (state.activeTab === t.id ? "active" : "") + '">' +
         esc(t.label) + '<span class="count"></span></button>';
-    }).join("") + '<div class="sidebar-version">' + esc(APP_VERSION) + '</div>';
+    }).join("");
     Array.prototype.forEach.call(sidebar.querySelectorAll("button"), function (b) {
       b.addEventListener("click", function () { switchTab(b.getAttribute("data-tab")); });
     });
@@ -2577,7 +2578,20 @@
       '</div>' +
       suggestionSectionHtml("names", "Remembered names") +
       suggestionSectionHtml("teams", "Remembered teams") +
-      suggestionSectionHtml("locations", "Remembered locations");
+      suggestionSectionHtml("locations", "Remembered locations") +
+      '<div class="panel"><h3>Data &amp; testing</h3>' +
+        '<p class="tab-desc" style="margin-bottom:10px;">Useful while testing \u2014 permanently remove loan history (and the Stats built from it) without touching your equipment catalog.</p>' +
+        '<div class="field-row" style="align-items:flex-end;">' +
+          '<div class="field"><label for="histClearFrom">From</label><input type="date" id="histClearFrom"></div>' +
+          '<div class="field"><label for="histClearTo">To</label><input type="date" id="histClearTo"></div>' +
+          '<div><button class="btn secondary" id="histClearRangeBtn" type="button">Delete records in range</button></div>' +
+        '</div>' +
+        '<p class="hint">Only completed (already checked-in) loans are affected \u2014 anything currently checked out or handed over is never touched.</p>' +
+        '<div id="histClearBanner"></div>' +
+        '<hr style="border:none;border-top:1px solid var(--border);margin:18px 0;">' +
+        '<p class="tab-desc" style="margin-bottom:10px;"><strong style="color:var(--text);">Full reset</strong> \u2014 deletes every loan record and returns all equipment to \u201Cin store\u201D, regardless of current status. Use this right before going live.</p>' +
+        '<button class="btn danger" id="clearAllHistoryBtn" type="button">Clear all history &amp; reset equipment</button>' +
+      '</div>';
     byId("authAdd").addEventListener("click", addAuthoriser);
     byId("authNew").addEventListener("keydown", function (e) { if (e.key === "Enter") addAuthoriser(); });
     renderAuthoriserList();
@@ -2597,6 +2611,91 @@
     byId("appReset").addEventListener("click", resetAccentColor);
     setupLogoDropzone();
     renderLogoPreview();
+    byId("histClearRangeBtn").addEventListener("click", clearHistoryInRange);
+    byId("clearAllHistoryBtn").addEventListener("click", clearAllHistory);
+  }
+
+  // ---------------------------------------------------------------
+  // Data & testing — wipe history/stats data (and optionally reset equipment)
+  // ---------------------------------------------------------------
+  async function deleteDocsInBatches(col, ids) {
+    var chunkSize = 400;
+    for (var i = 0; i < ids.length; i += chunkSize) {
+      var chunk = ids.slice(i, i + chunkSize);
+      var batch = db.batch();
+      chunk.forEach(function (id) { batch.delete(col.doc(id)); });
+      await batch.commit();
+    }
+  }
+
+  async function resetEquipmentToInStore(ids) {
+    var chunkSize = 400;
+    for (var i = 0; i < ids.length; i += chunkSize) {
+      var chunk = ids.slice(i, i + chunkSize);
+      var batch = db.batch();
+      chunk.forEach(function (id) { batch.update(equipmentCol.doc(id), { status: "in_store", currentCheckoutId: null }); });
+      await batch.commit();
+    }
+  }
+
+  async function clearHistoryInRange() {
+    showBanner("histClearBanner", "");
+    if (!db) { toast("Not connected to shared storage.", true); return; }
+    var fromStr = byId("histClearFrom").value;
+    var toStr = byId("histClearTo").value;
+    if (!fromStr || !toStr) return showBanner("histClearBanner", "Pick both a from and to date.");
+    if (fromStr > toStr) return showBanner("histClearBanner", "The from date must be before the to date.");
+
+    var matches = state.checkouts.filter(function (c) {
+      if (c.status !== "closed" || !c.checkOutTime) return false;
+      var d = c.checkOutTime.slice(0, 10);
+      return d >= fromStr && d <= toStr;
+    });
+    if (!matches.length) { showBanner("histClearBanner", "No completed loan records found in that range."); return; }
+    if (!window.confirm("Delete " + matches.length + " completed loan record(s) between " + fromStr + " and " + toStr + "? Currently active or handed-over loans are never affected. This can\u2019t be undone.")) return;
+
+    var btn = byId("histClearRangeBtn");
+    btn.disabled = true;
+    try {
+      var checkoutIds = matches.map(function (c) { return c.id; });
+      var checkinIds = matches.filter(function (c) { return c.checkinId; }).map(function (c) { return c.checkinId; });
+      await deleteDocsInBatches(checkoutsCol, checkoutIds);
+      if (checkinIds.length) await deleteDocsInBatches(checkinsCol, checkinIds);
+      toast("Deleted " + matches.length + " loan record(s).");
+      byId("histClearFrom").value = ""; byId("histClearTo").value = "";
+    } catch (e) {
+      console.error(e);
+      showBanner("histClearBanner", "Something went wrong deleting those records. Please try again.");
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  async function clearAllHistory() {
+    if (!db) { toast("Not connected to shared storage.", true); return; }
+    var totalDocs = state.checkouts.length + state.checkins.length;
+    if (!totalDocs) { toast("There\u2019s no history to clear."); return; }
+    var typed = window.prompt(
+      "This permanently deletes all " + state.checkouts.length + " check-out and " + state.checkins.length +
+      " check-in record(s), and returns every equipment item to \u201Cin store\u201D \u2014 including anything currently checked out. This can\u2019t be undone.\n\nType DELETE to confirm."
+    );
+    if (typed === null) return;
+    if (typed !== "DELETE") { toast("Not confirmed \u2014 nothing was deleted.", true); return; }
+
+    var btn = byId("clearAllHistoryBtn");
+    btn.disabled = true;
+    try {
+      await deleteDocsInBatches(checkoutsCol, state.checkouts.map(function (c) { return c.id; }));
+      await deleteDocsInBatches(checkinsCol, state.checkins.map(function (c) { return c.id; }));
+      var toReset = state.equipment.filter(function (e) { return e.status !== "in_store"; }).map(function (e) { return e.id; });
+      if (toReset.length) await resetEquipmentToInStore(toReset);
+      toast("History cleared and equipment reset to in store.");
+    } catch (e) {
+      console.error(e);
+      toast("Something went wrong clearing history. Please try again.", true);
+    } finally {
+      btn.disabled = false;
+    }
   }
 
   // ---------------------------------------------------------------
